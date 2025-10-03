@@ -78,7 +78,7 @@ class HealthMonitor:
         new_status = await batch_health_check(
             self.monitored_services,
             self.rpc_client,
-            timeout=1.5
+            timeout=15.0
         )
         
         # Check for status changes and trigger callbacks
@@ -208,9 +208,9 @@ class HealthMonitor:
 async def check_service_health(
         service_info: ServiceInfo,
         rpc_client: SyftBoxRPCClient,
-        timeout: float = 1.5,
+        timeout: float = 15.0,
         show_spinner: bool = True,
-        max_poll_attempts: int = 15,
+        max_poll_attempts: int = 20,
         poll_interval: float = 0.25
     ) -> HealthStatus:
     """Check health of a single service.
@@ -224,71 +224,100 @@ async def check_service_health(
         Health status of the service
     """
     try:
-        # Create a temporary client with shorter timeout for health checks
-        health_client = SyftBoxRPCClient(
-            cache_server_url=rpc_client.base_url,
-            timeout=timeout,
-            max_poll_attempts=max_poll_attempts,  # Updated to 15 attempts for health checks
-            poll_interval=poll_interval  # Updated to 0.25s polling interval
+        # Use syft-rpc directly to check initial response without polling
+        from syft_rpc.rpc import make_url, send
+        from syft_rpc.protocol import SyftStatus
+        
+        url = make_url(
+            datasite=service_info.datasite,
+            app_name=service_info.name,
+            endpoint="health"
         )
         
+        logger.debug(f"🔍 Checking health for {service_info.datasite}/{service_info.name} at URL: {url}")
+        
+        # Send health check request
+        future = send(
+            url=url,
+            method="GET",
+            body=None,
+            client=rpc_client.syft_client,
+            encrypt=False,
+            cache=False
+        )
+        
+        # For health checks, just wait for initial response (200 or 202 means service is alive)
+        # Run the blocking wait() call in an executor to avoid blocking the event loop
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        
         try:
-            # Create custom health call to control spinner display
-            from ..clients.endpoint_client import ServiceEndpoints
-            from ..clients.request_client import RequestArgs
+            # Run blocking wait() in thread pool executor for true parallelism
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                response = await loop.run_in_executor(
+                    executor,
+                    lambda: future.wait(timeout=timeout, poll_interval=poll_interval)
+                )
             
-            health_args = RequestArgs(is_accounting=False)
-            endpoints = ServiceEndpoints(service_info.datasite, service_info.name)
-            syft_url = endpoints.health_url()
-            
-            response = await health_client.call_rpc(
-                syft_url, 
-                payload=None, 
-                method="GET", 
-                show_spinner=show_spinner,  # Use the parameter to control spinner
-                args=health_args,
-                max_poll_attempts=15,
-                poll_interval=0.25
-            )
-            
-            # Parse health response
-            if isinstance(response, dict):
-                data = response.get("data", {})
-                message = data.get("message", {})
-                body = message.get("body", {})
-                
-                # Check if body is a dict (successful response) or string (error response)
-                if isinstance(body, dict):
-                    status = body.get("status", "unknown").lower()
-                    # logger.info(f"Parsed status for {service_info.name}: {status}")
-                    
-                    if status == "ok" or status == "healthy":
-                        return HealthStatus.ONLINE
-                    elif status == "error" or status == "unhealthy":
-                        return HealthStatus.OFFLINE
-                    else:
-                        return HealthStatus.UNKNOWN
+            # If we got any response from the service (200, 202, or even 400), it means it's online
+            # 400 = Bad Request, which means service is responding, just didn't like our request format
+            if response.status_code in [SyftStatus.OK, SyftStatus.ACCEPTED, 400]:
+                if response.status_code == 400:
+                    logger.info(f"✅ Service {service_info.datasite}/{service_info.name} responded with {response.status_code} (Bad Request but service is alive) - marking ONLINE")
                 else:
-                    # body is a string (error message), service is having issues
-                    # logger.warning(f"Service {service_info.name} returned error: {body}")
-                    return HealthStatus.OFFLINE
+                    logger.info(f"✅ Service {service_info.datasite}/{service_info.name} responded with {response.status_code} - marking ONLINE")
+                return HealthStatus.ONLINE
+            else:
+                # Other error codes (500, 503, etc.) indicate service problems
+                logger.warning(f"❌ Service {service_info.datasite}/{service_info.name} responded with status {response.status_code} - marking OFFLINE")
+                return HealthStatus.OFFLINE
                 
-        finally:
-            await health_client.close()
+        except Exception as wait_error:
+            # If waiting fails, check if we got an initial response before timeout
+            error_str = str(wait_error).lower()
+            if "timeout" in error_str or "timed out" in error_str:
+                logger.warning(f"⏱️  Service {service_info.name} timed out after {timeout}s - marking OFFLINE")
+                return HealthStatus.OFFLINE
+            # Log the actual error before re-raising
+            logger.warning(f"❌ Service {service_info.name} wait error: {type(wait_error).__name__}: {wait_error}")
+            raise  # Re-raise to be caught by outer exception handlers
+        
+        # Parse health response - try multiple formats (only reached if we got 200)
+        response_data = response.json()
+        if isinstance(response_data, dict):
+            # We already know service is online if we reach here (got 200)
+            # Just validate the response has some content
+            logger.debug(f"Service {service_info.name} returned valid response - confirmed ONLINE")
+            return HealthStatus.ONLINE
     
     except asyncio.TimeoutError:
-        return HealthStatus.TIMEOUT
-    except (NetworkError, RPCError) as e:
-        logger.debug(f"Health check failed for {service_info.name}: {e}")
+        # Timeout means service didn't respond in time (no 200/202 received or polling timed out)
+        logger.warning(f"⏱️  Service {service_info.name} asyncio timeout - marking OFFLINE")
         return HealthStatus.OFFLINE
+    except (NetworkError, RPCError) as e:
+        error_msg = str(e).lower()
+        
+        # Network/connection errors mean service is offline
+        if any(keyword in error_msg for keyword in [
+            "connection refused", "connection reset", "connection error",
+            "network", "unreachable", "timed out", "timeout",
+            "permission denied", "not found", "404", "503"
+        ]):
+            logger.warning(f"❌ Service {service_info.name}: {type(e).__name__}: {e} - marking OFFLINE")
+            return HealthStatus.OFFLINE
+        else:
+            # Other RPC errors might be temporary issues - mark as UNKNOWN
+            logger.warning(f"❓ Service {service_info.name} error ({type(e).__name__}: {e}) - marking UNKNOWN")
+            return HealthStatus.UNKNOWN
     except Exception as e:
-        logger.warning(f"Unexpected error in health check for {service_info.name}: {e}")
+        # Unexpected errors (like import errors) - mark as UNKNOWN
+        logger.warning(f"❓ Unexpected error in health check for {service_info.name}: {type(e).__name__}: {e}")
         return HealthStatus.UNKNOWN
     
 async def batch_health_check(
         services: List[ServiceInfo],
         rpc_client: SyftBoxRPCClient,
-        timeout: float = 1.5,
+        timeout: float = 15.0,
         max_concurrent: int = 10
     ) -> Dict[str, HealthStatus]:
     """Check health of multiple services concurrently.

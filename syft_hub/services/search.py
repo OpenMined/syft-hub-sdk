@@ -1,95 +1,45 @@
 """
-Search service client for SyftBox services
+Search service client using syft-rpc
 """
+import asyncio
 import logging
 from typing import Dict, Any
 
+from syft_rpc.rpc import send, make_url
+from syft_rpc.protocol import SyftStatus
+
+from ..clients import SyftBoxRPCClient
 from ..core.types import ServiceType
-from ..core.exceptions import RPCError, ValidationError, ServiceNotSupportedError
-from ..clients.rpc_client import SyftBoxRPCClient
+from ..core.exceptions import RPCError, TransactionTokenCreationError, ValidationError, ServiceNotSupportedError
 from ..models.responses import SearchResponse
 from ..models.service_info import ServiceInfo
-from ..utils.estimator import CostEstimator
+from ..utils.spinner import AsyncSpinner
 
 logger = logging.getLogger(__name__)
 
+
 class SearchService:
-    """Service client for document search services."""
+    """Service client for search services."""
     
     def __init__(self, service_info: ServiceInfo, rpc_client: SyftBoxRPCClient):
         """Initialize search service.
         
         Args:
             service_info: Information about the service
-            rpc_client: RPC client for making calls
-            
-        Raises:
-            ServiceNotSupportedError: If service doesn't support search
+            rpc_client: SyftBoxRPCClient instance
         """
         self.service_info = service_info
         self.rpc_client = rpc_client
         
-        # Validate that service supports search
         if not service_info.supports_service(ServiceType.SEARCH):
             raise ServiceNotSupportedError(service_info.name, "search", service_info)
-
-    def _parse_rpc_search_response(self, response_data: Dict[str, Any], original_query: str) -> SearchResponse:
-        """Parse RPC response into SearchResponse object.
-        
-        Handles the actual SyftBox response format for search:
-        {
-            "data": {
-                "message": {
-                    "body": {
-                        "id": "uuid-string",
-                        "query": "search query", 
-                        "results": [
-                            {
-                                "id": "doc-id",
-                                "score": 0.95,
-                                "content": "document content",
-                                "metadata": {...},
-                                "embedding": [...]
-                            }
-                        ],
-                        "providerInfo": {...},  # camelCase
-                        "cost": 0.1
-                    }
-                }
-            }
-        }
-        
-        Args:
-            response_data: Raw response data from RPC call matching schema.py format
-            original_query: The original search query
-            
-        Returns:
-            Parsed SearchResponse object
-        """
-        
-        try:
-            # Extract the actual response body from SyftBox nested structure
-            if "data" in response_data and "message" in response_data["data"]:
-                message_data = response_data["data"]["message"]
-                
-                if "body" in message_data and isinstance(message_data["body"], dict):
-                    # Extract the body and convert to schema.py format
-                    body = message_data["body"]
-                    return SearchResponse.from_dict(body, original_query)
-            
-            # If not nested format, try direct parsing
-            return SearchResponse.from_dict(response_data, original_query)
-                
-        except Exception as e:
-            logger.error(f"Failed to parse search response: {e}")
-            logger.error(f"Response data: {response_data}")
-            raise RPCError(f"Failed to parse search response: {e}")
     
-    async def search_with_params(self, params: Dict[str, Any]) -> SearchResponse:
-        """Search with explicit parameters dictionary.
+    async def search_with_params(self, params: Dict[str, Any], encrypt: bool = False) -> SearchResponse:
+        """Send search request with parameters.
         
         Args:
-            params: Dictionary of parameters including 'query' and optional params
+            params: Dictionary of parameters including 'message'
+            encrypt: Whether to encrypt the request
             
         Returns:
             Search response
@@ -98,6 +48,13 @@ class SearchService:
         if "message" not in params:
             raise ValidationError("'message' parameter is required")
         
+        # Build syft URL
+        url = make_url(
+            datasite=self.service_info.datasite,
+            app_name=self.service_info.name,
+            endpoint="search"
+        )
+
         # Extract standard parameters (make copy to avoid mutating input)
         params = params.copy()
         message = params.pop("message")
@@ -109,6 +66,7 @@ class SearchService:
         payload = {
             "user_email": account_email,
             "query": message,
+            "model": "tinyllama:latest" or self.service_info.name,
             "options": {"limit": topK}
         }
         
@@ -118,14 +76,67 @@ class SearchService:
         # Add any additional service-specific parameters
         for key, value in params.items():
             payload["options"][key] = value
+
+        search_service = self.service_info.get_service_info(ServiceType.SEARCH)
+        is_free_service = search_service and search_service.pricing == 0.0
+
+        if not is_free_service and self.rpc_client.accounting_client.is_configured():
+            try:
+                recipient_email = self.service_info.datasite
+                transaction_token = await self.rpc_client.accounting_client.create_transaction_token(
+                    recipient_email=recipient_email
+                )
+                payload["transaction_token"] = transaction_token
+            except Exception as e:
+                raise TransactionTokenCreationError(
+                    f"Failed to create accounting token: {e}",
+                    recipient_email=recipient_email
+                )
+
+        # Send request using syft-rpc
+        future = send(
+            url=url,
+            method="POST",
+            body=payload,
+            client=self.rpc_client.syft_client,
+            encrypt=encrypt,
+            cache=False  # Don't cache search requests
+        )
         
-        # Make RPC call
-        response_data = await self.rpc_client.call_search(self.service_info, payload)
-        return self._parse_rpc_search_response(response_data, message)
+        # Wait for response - use asyncio.to_thread to avoid blocking the event loop
+        spinner = AsyncSpinner("Waiting for service response")
+        await spinner.start_async()
+        try:
+            # Run the blocking wait() in a thread pool to enable true parallelism
+            response = await asyncio.to_thread(future.wait, timeout=120.0, poll_interval=0.5)
+            logger.info(f"Search response received from {self.service_info.datasite}/{self.service_info.name} (status: {response.status_code})")
+        finally:
+            # spinner.stop()
+            await spinner.stop_async("Response received")
         
-    def estimate_cost(self, query_count: int = 1, result_limit: int = 3) -> float:
-        return CostEstimator.estimate_search_cost(self.service_info, query_count, result_limit)
+        # Check status
+        if response.status_code != SyftStatus.SYFT_200_OK:
+            raise RPCError(
+                f"Search request failed: {response.status_code}",
+                self.service_info.name
+            )
         
+        # Parse response
+        try:
+            response_data = response.json()
+            
+            # Handle nested response format
+            if "data" in response_data and "message" in response_data["data"]:
+                message_data = response_data["data"]["message"]
+                if "body" in message_data:
+                    return SearchResponse.from_dict(message_data["body"], message)
+            
+            return SearchResponse.from_dict(response_data, message)
+            
+        except Exception as e:
+            logger.error(f"Failed to parse search response: {e}")
+            raise RPCError(f"Failed to parse search response: {e}")
+    
     @property
     def pricing(self) -> float:
         """Get pricing for search service."""
@@ -133,7 +144,6 @@ class SearchService:
         return search_service.pricing if search_service else 0.0
     
     @property
-    def charge_type(self) -> str:
-        """Get charge type for search service."""
-        search_service = self.service_info.get_service_info(ServiceType.SEARCH)
-        return search_service.charge_type.value if search_service else "per_request"
+    def is_paid(self) -> bool:
+        """Check if this is a paid service."""
+        return self.pricing > 0.0

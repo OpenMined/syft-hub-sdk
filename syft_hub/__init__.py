@@ -19,6 +19,7 @@ from .core.types import (
     ChatMessage,
     TransactionToken,
 )
+from syft_core import Client as SyftCoreClient
 
 # Exceptions
 from .core.settings import settings, Settings
@@ -41,14 +42,14 @@ from .core.exceptions import (
 )
 
 # Configuration utilities
-from .core.config import (
-    SyftBoxConfig,
-    get_config,
-    is_syftbox_installed,
-    is_syftbox_running,
-    get_startup_instructions,
-    get_installation_instructions,
-)
+# from .core.config import (
+#     SyftBoxConfig,
+#     get_config,
+#     is_syftbox_installed,
+#     is_syftbox_running,
+#     get_startup_instructions,
+#     get_installation_instructions,
+# )
 
 # Service clients (for advanced usage)
 from .services.chat import ChatService
@@ -105,6 +106,49 @@ __author__ = settings.project_author or "SyftBox Team"
 __email__ = settings.project_email or "info@openmined.org"
 __description__ = settings.project_description or "A Python SDK for discovering and using AI services across the SyftBox network."
 
+# Line 50-60: Replace config imports with syft_core
+from syft_core import Client as SyftCoreClient
+from syft_core.config import SyftClientConfig
+
+# Line 120-140: Reimplement using syft_core
+def check_installation() -> bool:
+    """Check if SyftBox is properly installed and configured."""
+    try:
+        SyftClientConfig.load()
+        return True
+    except Exception:
+        return False
+
+def check_running() -> bool:
+    """Check if SyftBox is properly running."""
+    # Use the validator that checks process/port
+    from .utils.validator import ProcessValidator
+    return ProcessValidator.is_syftbox_running()
+
+def get_setup_instructions() -> str:
+    """Get instructions for setting up SyftBox."""
+    from .utils.constants import DESKTOP_RELEASES_URL, QUICK_INSTALL_URL
+    return (
+        f"SyftBox not found. Install options:\n"
+        f"• Desktop: {DESKTOP_RELEASES_URL}\n"
+        f"• CLI: curl -fsSL {QUICK_INSTALL_URL} | sh\n"
+        f"• Then run 'syftbox setup'"
+    )
+
+def get_startup_instructions() -> str:
+    """Get instructions for starting up SyftBox."""
+    from .utils.constants import CLI_DOCS_URL, DESKTOP_DOCS_URL
+    return (
+        f"SyftBox installed but not running.\n"
+        f"Start with 'syftbox' (CLI) or launch desktop app.\n"
+        f"Docs: {CLI_DOCS_URL}"
+    )
+
+# Aliases for backward compatibility
+is_syftbox_installed = check_installation
+is_syftbox_running = check_running
+get_installation_instructions = get_setup_instructions
+
 # Package-level convenience functions
 def create_client(**kwargs) -> Client:
     """Create a Client with optional configuration.
@@ -118,39 +162,39 @@ def create_client(**kwargs) -> Client:
     return Client(**kwargs)
 
 
-def check_installation() -> bool:
-    """Check if SyftBox is properly installed and configured.
+# def check_installation() -> bool:
+#     """Check if SyftBox is properly installed and configured.
     
-    Returns:
-        True if SyftBox is available, False otherwise
-    """
-    return is_syftbox_installed()
+#     Returns:
+#         True if SyftBox is available, False otherwise
+#     """
+#     return is_syftbox_installed()
 
 
-def get_setup_instructions() -> str:
-    """Get instructions for setting up SyftBox.
+# def get_setup_instructions() -> str:
+#     """Get instructions for setting up SyftBox.
     
-    Returns:
-        Setup instructions as string
-    """
-    return get_installation_instructions()
+#     Returns:
+#         Setup instructions as string
+#     """
+#     return get_installation_instructions()
 
-def check_running() -> bool:
-    """Check if SyftBox is properly running.
+# def check_running() -> bool:
+#     """Check if SyftBox is properly running.
 
-    Returns:
-        True if SyftBox is running, False otherwise
-    """
-    return is_syftbox_running()
+#     Returns:
+#         True if SyftBox is running, False otherwise
+#     """
+#     return is_syftbox_running()
 
 
-def get_startup_instructions() -> str:
-    """Get instructions for starting up SyftBox.
+# def get_startup_instructions() -> str:
+#     """Get instructions for starting up SyftBox.
 
-    Returns:
-        Startup instructions as string
-    """
-    return get_startup_instructions()
+#     Returns:
+#         Startup instructions as string
+#     """
+#     return get_startup_instructions()
 
 # Package info for introspection
 def get_package_info():
@@ -240,8 +284,7 @@ __all__ = [
     "HealthCheckError",
     
     # Configuration
-    "SyftBoxConfig",
-    "get_config",
+    "SyftCoreClient",
     "is_syftbox_installed",
     "is_syftbox_running",
     "get_startup_instructions",
