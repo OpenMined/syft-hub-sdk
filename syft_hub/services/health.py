@@ -274,18 +274,26 @@ async def check_service_health(
         
         # Interpret response status codes:
         # - 2xx (success including 202) = service is healthy and responding correctly
-        # - 4xx (client error) = service is alive but request format/auth issue
+        # - 401, 403 (auth errors) = service is alive but authentication issue, mark as online
+        # - 404 (not found) = health endpoint doesn't exist, service not functional, mark as offline
+        # - Other 4xx = service has client-side issues, mark as offline
         # - 5xx (server error) = service has internal problems, mark as offline
-        if response.is_success or (400 <= status_code < 500):
-            # 2xx or 4xx: Service is responding
-            if 400 <= status_code < 500:
-                logger.info(f"Service {service_info.name} responded with {status_code} (client error but service is alive) - marking ONLINE")
-            else:
-                logger.info(f"Service {service_info.name} responded with {status_code} - marking ONLINE")
+        if response.is_success:
+            # 2xx: Service is healthy
+            logger.info(f"Service {service_info.name} responded with {status_code} - marking ONLINE")
+            return HealthStatus.ONLINE
+        elif status_code in [401, 403]:
+            # Authentication/authorization errors - service is running but needs auth
+            logger.info(f"Service {service_info.name} responded with {status_code} (auth error but service is alive) - marking ONLINE")
             return HealthStatus.ONLINE
         else:
-            # 5xx or other error codes indicate service problems
-            logger.warning(f"Service {service_info.name} returned {status_code} (server error) - marking OFFLINE")
+            # 404, other 4xx, 5xx or other error codes indicate service problems
+            if status_code == 404:
+                logger.warning(f"Service {service_info.name} returned {status_code} (health endpoint not found) - marking OFFLINE")
+            elif 400 <= status_code < 500:
+                logger.warning(f"Service {service_info.name} returned {status_code} (client error) - marking OFFLINE")
+            else:
+                logger.warning(f"Service {service_info.name} returned {status_code} (server error) - marking OFFLINE")
             return HealthStatus.OFFLINE
     
     except SyftTimeoutError:
