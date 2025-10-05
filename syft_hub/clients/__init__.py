@@ -1,7 +1,10 @@
 # Client components
 from .accounting_client import AccountingClient
-from .auth_client import SyftBoxAuthClient
-from .rpc_client import SyftBoxRPCClient
-from .auth_client import SyftBoxAuthClient
+from .auth_client import AuthClient
+from .request_client import RequestArgs
 
-__all__ = ["AccountingClient", "SyftBoxRPCClient", "SyftBoxAuthClient"]
+__all__ = [
+    "AccountingClient", 
+    "AuthClient", 
+    "RequestArgs"
+]

@@ -348,8 +348,12 @@ pipeline = client.pipeline(
         self.synthesizer = ServiceSpec(name=service_name, params=params)
         return self
     
-    def validate(self) -> bool:
-        """Check that all services exist, are reachable, and support required operations"""
+    def validate(self, skip_health_check: bool = False) -> bool:
+        """Check that all services exist, are reachable, and support required operations
+        
+        Args:
+            skip_health_check: If True, skip health checks during validation (used during pipeline creation)
+        """
         if not self.data_sources:
             raise ValidationError("No data sources configured")
         
@@ -359,7 +363,7 @@ pipeline = client.pipeline(
         # Validate data sources
         for source_spec in self.data_sources:
             try:
-                service = self.client.load_service(source_spec.name)
+                service = self.client.load_service(source_spec.name, skip_health_check=skip_health_check)
                 if not service.supports_search:
                     raise ServiceNotSupportedError(service.name, "search", service._service_info)
             except ServiceNotFoundError:
@@ -367,7 +371,7 @@ pipeline = client.pipeline(
         
         # Validate synthesizer
         try:
-            service = self.client.load_service(self.synthesizer.name)
+            service = self.client.load_service(self.synthesizer.name, skip_health_check=skip_health_check)
             if not service.supports_chat:
                 raise ServiceNotSupportedError(service.name, "chat", service._service_info)
         except ServiceNotFoundError:
@@ -382,7 +386,8 @@ pipeline = client.pipeline(
         data_sources = []
         for source_spec in self.data_sources:
             try:
-                service = self.client.load_service(source_spec.name)
+                # Skip health check during cost estimation (creation-time operation)
+                service = self.client.load_service(source_spec.name, skip_health_check=True)
                 data_sources.append((service._service_info, source_spec.params))
             except ServiceNotFoundError:
                 logger.warning(f"Service '{source_spec.name}' not found during cost estimation")
@@ -392,7 +397,8 @@ pipeline = client.pipeline(
         synthesizer_service = None
         if self.synthesizer:
             try:
-                service = self.client.load_service(self.synthesizer.name)
+                # Skip health check during cost estimation (creation-time operation)
+                service = self.client.load_service(self.synthesizer.name, skip_health_check=True)
                 synthesizer_service = service._service_info
             except ServiceNotFoundError:
                 logger.warning(f"Synthesizer service '{self.synthesizer.name}' not found during cost estimation")

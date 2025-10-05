@@ -4,9 +4,7 @@ Main Syft Hub SDK client
 import json
 import os
 import asyncio
-import concurrent.futures
 import logging
-import threading
 import hashlib
 import time
 
@@ -14,11 +12,15 @@ from typing import List, Optional, Dict, Any, Union, Awaitable
 from pathlib import Path
 from dotenv import load_dotenv
 
+from syft_core import Client as SyftClient
+from syft_crypto.x3dh_bootstrap import ensure_bootstrap
+
+# from .clients import auth_client
 from .core import Service, Pipeline
-from .core.config import ConfigManager
 from .core.types import ServiceType, HealthStatus, DocumentResult
 from .core.exceptions import (
     AuthenticationError,
+    PaymentError,
     ServiceNotFoundError,
     SyftBoxNotFoundError, 
     SyftBoxNotRunningError,
@@ -26,7 +28,7 @@ from .core.exceptions import (
     ValidationError,
 )
 from .discovery import FastScanner, MetadataParser, ServiceFilter, FilterCriteria
-from .clients import SyftBoxRPCClient, AccountingClient, SyftBoxAuthClient
+from .clients import AccountingClient, AuthClient
 from .services import ChatService, SearchService, HealthMonitor, check_service_health, batch_health_check
 from .models import ChatResponse, SearchResponse, DocumentResult, ServicesList, ServiceInfo
 from .utils.formatting import format_services_table, format_service_details
@@ -57,7 +59,6 @@ class Client:
     def __init__(
             self, 
             syftbox_config_path: Optional[Path] = None,
-            cache_server_url: Optional[str] = None,
             accounting_client: Optional[AccountingClient] = None,
             set_accounting: bool = True,
             accounting_pass: Optional[str] = None,
@@ -68,37 +69,30 @@ class Client:
         
         Args:
             syftbox_config_path: Custom path to SyftBox config file
-            cache_server_url: Override cache server URL
             accounting_client: Pre-configured AccountingClient instance
             set_accounting: Whether to set up accounting (creates account if needed)
             accounting_pass: Password for existing accounting account (required if set_accounting=True and account exists)
             _auto_setup_accounting: Whether to prompt for accounting setup when needed
             _auto_health_check_threshold: Max services for auto health checking
         """
-        # Check SyftBox availability and config manager with custom path if provided
-        self.config_manager = ConfigManager(syftbox_config_path)
+        # Load syft-core client
+        try:
+            self.syft_client = SyftClient.load(syftbox_config_path)
+        except Exception as e:
+            raise SyftBoxNotFoundError(f"Failed to load SyftBox config: {e}")
         
-        # Check if installed first
-        if not self.config_manager.is_syftbox_installed():
-            raise SyftBoxNotFoundError(self.config_manager.get_installation_instructions())
-
-        # Then check if running  
-        if not self.config_manager.is_syftbox_running():
-            raise SyftBoxNotRunningError(self.config_manager.get_startup_instructions())
+        # Bootstrap encryption keys
+        self.syft_client = ensure_bootstrap(self.syft_client)
         
-        # Store config for later use
-        self.config = self.config_manager.config
+        # Verify SyftBox is running by checking datasite exists
+        if not self.syft_client.my_datasite.exists():
+            raise SyftBoxNotRunningError(
+                f"SyftBox datasite not found at {self.syft_client.my_datasite}. "
+                "Please ensure SyftBox is running."
+            )
         
         # Initialize account state
         self._account_configured = False
-
-        # Set up SyftBox authentication client using the loaded config
-        self.syftbox_auth_client, is_auth_configured = SyftBoxAuthClient.setup_auth_discovery(self.config)
-        
-        if is_auth_configured:
-            logger.info(f"SyftBox authentication configured for {self.syftbox_auth_client.get_user_email()}")
-        else:
-            logger.info("Using guest mode - no SyftBox authentication found")
 
         # Set up accounting client with new set_accounting logic
         if accounting_client:
@@ -108,63 +102,51 @@ class Client:
         else:
             # Check for existing accounting credentials
             client, is_configured = AccountingClient.setup_accounting_discovery()
-            user_email = self.config.email
+            user_email = self.syft_client.email
 
             # If credentials are configured, try to connect
             if is_configured:
-                # Get existing password from the configured client
-                existing_password = client._credentials["password"] if client._credentials else None
-
-                if existing_password is None:
-                    raise ValueError("Accounting account already exists, but the password is not set.")
-
-                # Verify the provided password works
-                try:
-                    client.connect_accounting(client.accounting_url, client.get_email(), existing_password)
-                    self._account_configured = True
-                    self.accounting_client = client
-
-                    logger.info(f"Connected to existing accounting account for {client.get_email()}")
-                except Exception as e:
-                    raise AuthenticationError(f"Failed to connect with provided password: {e}")
+                # Credentials were loaded from env or config - client is already connected
+                self.accounting_client = client
+                self._account_configured = True
+                logger.info(f"Connected to existing accounting account for {client.get_email()}")
+            
             # If accounting_pass is provided, try connect
             elif accounting_pass:
+                # Create fresh client and connect
+                client = AccountingClient()  # Fresh client
                 try:
                     client.connect_accounting(client.accounting_url, user_email, accounting_pass)
-                    self._account_configured = True
                     self.accounting_client = client
-
+                    self._account_configured = True
                     logger.info(f"Connected to existing accounting account for {user_email}")
                 except Exception as e:
                     raise AuthenticationError(f"Failed to connect with provided password: {e}")
+            
             elif set_accounting:
+                # Create new account
+                client = AccountingClient()  # Fresh client
                 try:
                     generated_password = _generate_password_from_email_timestamp(user_email)
                     client.register_accounting(user_email, generated_password)
                     client.save_credentials()
                     self.accounting_client = client
-
+                    self._account_configured = True
                     print(f"Generated password: {generated_password}")
                     print("⚠️ Save the password, this won't be shown again!")
-                    self._account_configured = True
                     logger.info(f"Successfully created accounting account for {user_email}")
                 except Exception as e:
                     raise RuntimeError(f"Failed to create accounting account: {e}")
             else:
-                self.accounting_client = None
-                
-        
-        # Set up RPC client
-        server_url = cache_server_url or self.config.cache_server_url
-        
-        self.rpc_client = SyftBoxRPCClient(
-            cache_server_url=server_url,
-            accounting_client=self.accounting_client,
-            syftbox_auth_client=self.syftbox_auth_client,
-        )
+                # No accounting setup requested
+                self.accounting_client = AccountingClient()
+                self._account_configured = False
+
+        # Set up auth clients
+        self.auth_client = AuthClient(self.syft_client)
         
         # Set up discovery services
-        self._scanner = FastScanner(self.config)
+        self._scanner = FastScanner(self.syft_client)
         self._parser = MetadataParser()
         
         # Configuration
@@ -173,9 +155,14 @@ class Client:
         
         # Optional health monitor
         self._health_monitor: Optional[HealthMonitor] = None
+        
+        # Health status cache for consistent caching across service loads
+        # Key: "datasite/service_name", Value: (HealthStatus, timestamp)
+        self._health_status_cache: Dict[str, tuple] = {}
+        # Cache expiration time in seconds (1 hour)
+        self._health_cache_ttl: float = 3600.0
 
-        # Load user email from config if not provided (from_email and self._account_configured)
-        logger.info(f"Client initialized for {self.config.email}")
+        logger.info(f"Client initialized for {self.syft_client.email}")
     
     def __dir__(self):
         """Control what appears in autocomplete suggestions.
@@ -215,11 +202,6 @@ class Client:
             'start_health_monitoring',
             'stop_health_monitoring',
             
-            # Properties
-            'config',
-            'config_manager',
-            'rpc_client',
-            
             # Helper methods
             'remove_duplicate_results',
             'format_search_context',
@@ -231,7 +213,8 @@ class Client:
     
     async def close(self):
         """Close client and cleanup resources."""
-        await self.rpc_client.close()
+        await self.auth_client.close()
+        await self.accounting_client.close()
         if self._health_monitor:
             await self._health_monitor.stop_monitoring()
     
@@ -329,13 +312,27 @@ class Client:
         if not metadata_path:
             raise ServiceNotFoundError(f"'{service_name}'")
         
-        return self._parser.parse_service_from_files(metadata_path)
+        service_info = self._parser.parse_service_from_files(metadata_path)
+        
+        # Restore cached health status if available and not expired
+        cache_key = f"{service_info.datasite}/{service_info.name}"
+        if cache_key in self._health_status_cache:
+            cached_status, cached_time = self._health_status_cache[cache_key]
+            # Check if cache is still valid (< 1 hour old)
+            if time.time() - cached_time < self._health_cache_ttl:
+                service_info.health_status = cached_status
+            else:
+                # Cache expired, remove it
+                del self._health_status_cache[cache_key]
+        
+        return service_info
     
-    def load_service(self, service_name: str) -> Service:
+    def load_service(self, service_name: str, skip_health_check: bool = False) -> Service:
         """Load a service by name and return Service object for interaction.
         
         Args:
             service_name: Full service name in format 'datasite/service_name'
+            skip_health_check: If True, skip health check during loading
             
         Returns:
             Service object for object-oriented interaction
@@ -356,12 +353,13 @@ class Client:
             service_info.health_status == HealthStatus.UNKNOWN or 
             service_info.health_status == HealthStatus.OFFLINE):
             try:
-                from .services.health import check_service_health
-                from .utils.async_utils import run_async_in_thread
                 health_status = run_async_in_thread(
-                    check_service_health(service_info, self.rpc_client, timeout=1.5)
+                    check_service_health(service_info, self.syft_client, timeout=15.0)
                 )
                 service_info.health_status = health_status
+                # Update cache
+                cache_key = f"{service_info.datasite}/{service_info.name}"
+                self._health_status_cache[cache_key] = (health_status, time.time())
             except Exception as e:
                 logger.debug(f"Health check failed for {service_name}: {e}")
                 # Leave health_status as None if check fails
@@ -408,12 +406,21 @@ class Client:
         service = self.get_service(service_name)
         logger.info(f"Using service: {service.name} from datasite: {service.datasite}") 
         
-        # Check if service is online - use cached status if available, otherwise query
-        if service.health_status and service.health_status != HealthStatus.UNKNOWN:
+        # Check if service is online - only check health if cached status is UNKNOWN or OFFLINE
+        if service.health_status == HealthStatus.ONLINE:
+            # Use cached ONLINE status, skip health check
             health_status = service.health_status
-        else:
+        elif service.health_status is None or service.health_status in (HealthStatus.UNKNOWN, HealthStatus.OFFLINE):
+            # Perform health check for UNKNOWN, OFFLINE, or None status
             # Use longer timeout for chat health checks as chat services may take longer to respond
-            health_status = await check_service_health(service, self.rpc_client, timeout=5.0)
+            health_status = await check_service_health(
+                service, 
+                self.syft_client,      
+                timeout=5.0,
+            )
+            # Update cache
+            cache_key = f"{service.datasite}/{service.name}"
+            self._health_status_cache[cache_key] = (health_status, time.time())
         
         if health_status == HealthStatus.OFFLINE:
             raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")
@@ -426,7 +433,6 @@ class Client:
         chat_service_info = service.get_service_info(ServiceType.CHAT)
         if chat_service_info and chat_service_info.pricing > 0:
             if not self._account_configured:
-                from .core.exceptions import PaymentError
                 raise PaymentError(
                     f"Service '{service.datasite}/{service.name}' is a paid service (${chat_service_info.pricing} per request). "
                     f"To call a paid service, you need to set up your accounting by calling Client(set_accounting=True)."
@@ -444,7 +450,12 @@ class Client:
         chat_params = {k: v for k, v in chat_params.items() if v is not None}
         
         # Create service and make request
-        chat_service = ChatService(service, self.rpc_client)
+        chat_service = ChatService(
+            service, 
+            self.syft_client, 
+            self.accounting_client, 
+            self.auth_client,
+        )
         return await chat_service.chat_with_params(chat_params)
     
     def chat_sync(
@@ -480,8 +491,12 @@ class Client:
                 health_status = service.health_status
             else:
                 # Use longer timeout for chat health checks as chat services may take longer to respond
-                health_status = await check_service_health(service, self.rpc_client, timeout=5.0)
-            
+                health_status = await check_service_health(
+                    service, 
+                    self.syft_client,
+                    timeout=5.0,
+                )
+
             if health_status == HealthStatus.OFFLINE:
                 raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")
             
@@ -493,7 +508,6 @@ class Client:
             chat_service_info = service.get_service_info(ServiceType.CHAT)
             if chat_service_info and chat_service_info.pricing > 0:
                 if not self._account_configured:
-                    from .core.exceptions import PaymentError
                     raise PaymentError(
                         f"Service '{service.datasite}/{service.name}' is a paid service (${chat_service_info.pricing} per request). "
                         f"To call a paid service, you need to set up your accounting by calling Client(set_accounting=True)."
@@ -514,21 +528,15 @@ class Client:
             
             # Remove None values
             chat_params = {k: v for k, v in chat_params.items() if v is not None}
-            
-            # Create a new ChatService with a fresh HTTP client for this event loop
-            from .clients.request_client import HTTPClient
-            from .services.chat import ChatService
-            http_client = HTTPClient()
-            try:
-                rpc_client = SyftBoxRPCClient(
-                    cache_server_url=self.rpc_client.base_url,
-                    accounting_client=self.accounting_client,
-                    http_client=http_client
-                )
-                chat_service = ChatService(service, rpc_client)
-                return await chat_service.chat_with_params(chat_params)
-            finally:
-                await http_client.close()
+        
+            # Create service and make request
+            chat_service = ChatService(
+                service, 
+                self.syft_client, 
+                self.accounting_client, 
+                self.auth_client
+            )
+            return await chat_service.chat_with_params(chat_params)
         
         return run_async_in_thread(_chat())
     
@@ -605,7 +613,11 @@ class Client:
             if service.health_status and service.health_status != HealthStatus.UNKNOWN:
                 health_status = service.health_status
             else:
-                health_status = await check_service_health(service, self.rpc_client, timeout=1.5)
+                health_status = await check_service_health(
+                    service, 
+                    self.syft_client,
+                    timeout=5.0,
+                )
             
             if health_status == HealthStatus.OFFLINE:
                 raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")
@@ -618,7 +630,6 @@ class Client:
             search_service_info = service.get_service_info(ServiceType.SEARCH)
             if search_service_info and search_service_info.pricing > 0:
                 if not self._account_configured:
-                    from .core.exceptions import PaymentError
                     raise PaymentError(
                         f"Service '{service.datasite}/{service.name}' is a paid service (${search_service_info.pricing} per request). "
                         f"To call a paid service, you need to set up your accounting by calling Client(set_accounting=True)."
@@ -635,19 +646,13 @@ class Client:
             # Remove None values
             search_params = {k: v for k, v in search_params.items() if v is not None}
             
-            # Create a new SearchService with a fresh HTTP client for this event loop
-            from .clients.request_client import HTTPClient
-            http_client = HTTPClient()
-            try:
-                rpc_client = SyftBoxRPCClient(
-                    cache_server_url=self.rpc_client.base_url,
-                    accounting_client=self.accounting_client,
-                    http_client=http_client
-                )
-                search_service = SearchService(service, rpc_client)
-                return await search_service.search_with_params(search_params)
-            finally:
-                await http_client.close()
+            search_service = SearchService(
+                service, 
+                self.syft_client,
+                self.accounting_client,
+                self.auth_client
+            )
+            return await search_service.search_with_params(search_params)
         
         return run_async_in_thread(_search())
     
@@ -691,11 +696,23 @@ class Client:
         service = self.get_service(service_name)
         logger.info(f"Using service: {service.name} from datasite: {service.datasite}") 
         
-        # Check if service is online - use cached status if available, otherwise query
-        if service.health_status and service.health_status != HealthStatus.UNKNOWN:
+        # Check if service is online - only check health if cached status is UNKNOWN or OFFLINE
+        if service.health_status == HealthStatus.ONLINE:
+            # Use cached ONLINE status, skip health check
             health_status = service.health_status
+        elif service.health_status is None or service.health_status in (HealthStatus.UNKNOWN, HealthStatus.OFFLINE):
+            # Perform health check for UNKNOWN, OFFLINE, or None status
+            health_status = await check_service_health(service, self.syft_client, timeout=15.0)
+            service.health_status = health_status
+            # Update cache for consistent health status
+            cache_key = f"{service.datasite}/{service.name}"
+            self._health_status_cache[cache_key] = (health_status, time.time())
         else:
-            health_status = await check_service_health(service, self.rpc_client, timeout=1.5)
+            health_status = await check_service_health(
+                service, 
+                self.syft_client,
+                timeout=5.0,
+            )
         
         if health_status == HealthStatus.OFFLINE:
             raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")
@@ -708,7 +725,6 @@ class Client:
         search_service_info = service.get_service_info(ServiceType.SEARCH)
         if search_service_info and search_service_info.pricing > 0:
             if not self._account_configured:
-                from .core.exceptions import PaymentError
                 raise PaymentError(
                     f"Service '{service.datasite}/{service.name}' is a paid service (${search_service_info.pricing} per request). "
                     f"To call a paid service, you need to set up your accounting by calling Client(set_accounting=True)."
@@ -726,7 +742,12 @@ class Client:
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
         # Create service and make request
-        search_service = SearchService(service, self.rpc_client)
+        search_service = SearchService(
+            service, 
+            self.syft_client, 
+            self.accounting_client, 
+            self.auth_client
+        )
         return await search_service.search_with_params(search_params)
 
     def search(
@@ -858,7 +879,7 @@ class Client:
         service.show()
     
     # Health Monitoring Methods
-    async def check_service_health(self, service_name: str, timeout: float = 1.5) -> HealthStatus:
+    async def check_service_health(self, service_name: str, timeout: float = 15.0) -> HealthStatus:
         """Check health of a specific service.
         
         Args:
@@ -884,7 +905,11 @@ class Client:
         if not service:
             raise ServiceNotFoundError(f"Service '{service_name}' not found")
 
-        return await check_service_health(service, self.rpc_client, timeout)
+        return await check_service_health(
+            service, 
+            self.syft_client,
+            timeout
+        )
     
     async def check_all_services_health(
             self, 
@@ -901,8 +926,12 @@ class Client:
             Dictionary mapping service names to health status
         """
         services = self.list_services(service_type=service_type, health_check="never")
-        return await batch_health_check(services, self.rpc_client, timeout)
-    
+        return await batch_health_check(
+            services, 
+            self.syft_client,
+            timeout,
+        )
+
     def start_health_monitoring(
             self, 
             services: Optional[List[str]] = None,
@@ -920,9 +949,9 @@ class Client:
         if self._health_monitor:
             logger.warning("Health monitoring already running")
             return self._health_monitor
-        
-        self._health_monitor = HealthMonitor(self.rpc_client, check_interval)
-        
+
+        self._health_monitor = HealthMonitor(self.syft_client, check_interval)
+
         # Add services to monitor
         if services:
             for service_name in services:
@@ -970,9 +999,12 @@ class Client:
         )
         return Pipeline(client=self)
 
-    def pipeline(self, data_sources: Optional[List[Union[str, Dict, 'Service']]] = None, 
-                synthesizer: Optional[Union[str, Dict, 'Service']] = None, 
-                context_format: Optional[str] = None) -> Pipeline:
+    def pipeline(
+            self, 
+            data_sources: Optional[List[Union[str, Dict, 'Service']]] = None, 
+            synthesizer: Optional[Union[str, Dict, 'Service']] = None, 
+            context_format: Optional[str] = None
+        ) -> Pipeline:
         """Create and configure a pipeline for RAG/FedRAG workflows.
         
         Args:
@@ -1186,9 +1218,9 @@ class Client:
         from IPython.display import display, HTML
         
         # Get status information
-        syftbox_status = "Running" if self.config_manager.is_syftbox_running() else "Not Running"
-        syftbox_path = str(self.config.data_dir)
-        cache_server = self.config.cache_server_url
+        syftbox_status = "Running" if self.syft_client.my_datasite.exists() else "Not Running"
+        syftbox_path = str(self.syft_client.my_datasite)
+        cache_server = self.syft_client.config.server_url if hasattr(self.syft_client.config, 'server_url') else "https://syftbox.openmined.org"
         account_email = self.accounting_client.get_email() if self._account_configured else None
         
         # Count available services
@@ -1323,9 +1355,9 @@ class Client:
     def __repr__(self) -> str:
         """Return a text representation of the client's status."""
         # Get status information
-        syftbox_status = "Running" if self.config_manager.is_syftbox_running() else "Not Running"
-        syftbox_path = str(self.config.data_dir)
-        cache_server = self.config.cache_server_url
+        syftbox_status = "Running" if self.syft_client.my_datasite.exists() else "Not Running"
+        syftbox_path = str(self.syft_client.my_datasite)
+        cache_server = self.syft_client.config.server_url if hasattr(self.syft_client.config, 'server_url') else "https://syftbox.openmined.org"
         account_email = self.accounting_client.get_email() if self._account_configured else None
         
         # Count available services
@@ -1357,9 +1389,9 @@ class Client:
         from .utils.theme import generate_adaptive_css
         
         # Get status information
-        syftbox_status = "Running" if self.config_manager.is_syftbox_running() else "Not Running"
-        syftbox_path = str(self.config.data_dir)
-        cache_server = self.config.cache_server_url
+        syftbox_status = "Running" if self.syft_client.my_datasite.exists() else "Not Running"
+        syftbox_path = str(self.syft_client.my_datasite)
+        cache_server = self.syft_client.config.server_url if hasattr(self.syft_client.config, 'server_url') else "https://syftbox.openmined.org"
         account_email = self.accounting_client.get_email() if self._account_configured else None
         
         # Count available services
@@ -1436,8 +1468,9 @@ class Client:
     
     # Updated Service Usage Methods
     def clear_cache(self):
-        """Clear the service discovery cache."""
+        """Clear the service discovery cache and health status cache."""
         self._scanner.clear_cache()
+        self._health_status_cache.clear()
     
     # Private helper methods
     def _extract_request_parameters(self, request_schema: Dict[str, Any], all_schemas: Dict[str, Any]) -> Dict[str, Any]:
@@ -1534,51 +1567,84 @@ class Client:
     
     async def _add_health_status(self, services: List[ServiceInfo]) -> List[ServiceInfo]:
         """Add health status to services with progress feedback."""
-        health_status = await self._batch_health_check_with_progress(services, self.rpc_client, timeout=1.5)
+        health_status = await self._batch_health_check_with_progress(services, self.syft_client, timeout=15.0)
         
         for service in services:
-            service.health_status = health_status.get(service.name, HealthStatus.UNKNOWN)
+            status = health_status.get(service.name, HealthStatus.UNKNOWN)
+            service.health_status = status
+            # Update cache for each service
+            cache_key = f"{service.datasite}/{service.name}"
+            self._health_status_cache[cache_key] = (status, time.time())
         
         return services
     
     async def _batch_health_check_with_progress(
         self, 
         services: List[ServiceInfo], 
-        rpc_client: SyftBoxRPCClient,
+        syft_client: SyftClient,
         timeout: float = 2.0,
-        max_concurrent: int = 10
+        max_concurrent: int = 30
     ) -> Dict[str, HealthStatus]:
         """Check health of multiple services with progress feedback and online service display."""
         if not services:
             return {}
 
-        online_services = []
-        spinner_stopped = False
+        try:
+            from IPython.display import display, HTML, clear_output
+            in_notebook = True
+        except:
+            in_notebook = False
         
-        # Start a spinner for the health check process
-        from .utils.spinner import Spinner
-        spinner = Spinner("Waiting for service response")
-        spinner.start()
+        # Counters for progress tracking
+        completed = 0
+        online_count = 0
+        total = len(services)
         
         # Import semaphore for concurrent control
         semaphore = asyncio.Semaphore(max_concurrent)
         
+        def update_progress():
+            """Update the progress display."""
+            progress_pct = int((completed / total) * 100)
+            progress_bar_width = int((completed / total) * 40)
+            bar = '█' * progress_bar_width + '░' * (40 - progress_bar_width)
+            
+            if in_notebook:
+                # Use HTML display for notebooks
+                html = f'''
+                <div style="font-family: monospace; padding: 8px; background: #f5f5f5; border-radius: 4px; margin: 4px 0;">
+                    <div style="margin-bottom: 4px;">🔍 Checking service health...</div>
+                    <div style="background: #e0e0e0; border-radius: 8px; height: 24px; position: relative; overflow: hidden;">
+                        <div style="background: linear-gradient(90deg, #4CAF50, #45a049); height: 100%; width: {progress_pct}%; transition: width 0.3s;"></div>
+                        <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: #333; font-weight: bold;">
+                            {completed}/{total} services | ✅ {online_count} online ({progress_pct}%)
+                        </div>
+                    </div>
+                </div>
+                '''
+                clear_output(wait=True)
+                display(HTML(html))
+            else:
+                # Use terminal output for non-notebook
+                print(f"\r🔍 [{bar}] {completed}/{total} services | ✅ {online_count} online", end='', flush=True)
+        
+        # Show initial progress
+        update_progress()
+        
         async def check_single_service_with_feedback(service: ServiceInfo) -> tuple[str, HealthStatus]:
-            nonlocal spinner_stopped
+            nonlocal completed, online_count
+            
             async with semaphore:
                 # Check health without individual spinners
-                health = await check_service_health(service, rpc_client, timeout, show_spinner=False)
+                health = await check_service_health(service, syft_client, timeout, show_spinner=False)
                 
-                # Display status message based on health result
-                service_name = f"{service.datasite}/{service.name}"
+                # Update counters
+                completed += 1
                 if health == HealthStatus.ONLINE:
-                    # Stop spinner on first output if not already stopped
-                    if not spinner_stopped:
-                        spinner.stop()
-                        spinner_stopped = True
-                    
-                    online_services.append(service_name)
-                    print(f"Service \"{service_name}\" is online!")
+                    online_count += 1
+                
+                # Update progress display
+                update_progress()
                 
                 return service.name, health
         
@@ -1589,9 +1655,14 @@ class Client:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         end_time = time.time()
         
-        # Ensure spinner is stopped even if no services were online
-        if not spinner_stopped:
-            spinner.stop()
+        # Show final summary
+        if in_notebook:
+            clear_output(wait=True)
+        else:
+            print()  # Move to next line
+        
+        print(f"✓ Health check complete in {end_time - start_time:.1f}s | ✅ {online_count}/{total} services online")
+        print()  # Add spacing before widget
         
         logger.info(f"Batch health check completed in {end_time - start_time:.2f}s for {len(services)} services")
         
@@ -1724,61 +1795,3 @@ class Client:
         
         return unique_results
     
-    # TODO: Payment Handling - called internally before paid service use
-    async def _ensure_payment_setup(self, service: ServiceInfo) -> Optional[str]:
-        """Ensure payment is set up for a paid service.
-        
-        Args:
-            service: Service that requires payment
-            
-        Returns:
-            Transaction token if payment required, None if free
-        """
-        # Check if service requires payment
-        service_info = None
-        if service.supports_service(ServiceType.CHAT):
-            service_info = service.get_service_info(ServiceType.CHAT)
-        elif service.supports_service(ServiceType.SEARCH):
-            service_info = service.get_service_info(ServiceType.SEARCH)
-        
-        # Early return for free services - skip all accounting logic entirely
-        if not service_info or service_info.pricing == 0:
-            return None  # Free service
-        
-        # Service requires payment - ensure accounting is set up
-        if not self.is_accounting_configured():
-            if self._auto_setup_accounting:
-                print(f"\nPayment Required")
-                print(f"Service '{service.name}' costs ${service_info.pricing} per request")
-                print(f"Datasite: {service.datasite}")
-                print(f"\nAccounting setup required for paid services.")
-                
-                try:
-                    response = input("Would you like to set up accounting now? (y/n): ").lower().strip()
-                    if response in ['y', 'yes']:
-                        # Interactive setup would go here
-                        print("Please use below to configure:\n")
-                        print("     client.register_accounting(email, password) to configure.")
-                        return None
-                    else:
-                        print("Payment setup skipped.")
-                        return None
-                except (EOFError, KeyboardInterrupt):
-                    print("\nPayment setup cancelled.")
-                    return None
-            else:
-                from .core.exceptions import PaymentError
-                raise PaymentError(
-                    f"Service '{service.name}' requires payment (${service_info.pricing}) "
-                    "but accounting is not configured"
-                )
-        
-        # Create transaction token????????
-        try:
-            token = await self.accounting_client.create_transaction_token(service.datasite)
-            logger.info(f"Payment authorized: ${service_info.pricing} to {service.datasite}")
-            return token
-        except Exception as e:
-            from .core.exceptions import PaymentError
-            raise PaymentError(f"Failed to create payment token: {e}")
-        

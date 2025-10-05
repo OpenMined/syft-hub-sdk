@@ -1,12 +1,14 @@
 """
 ServiceInfo data class and related utilities
 """
+from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from pathlib import Path
 from datetime import datetime
 
 from ..core.types import ServiceItem, ServiceType, ServiceStatus, HealthStatus
+from ..utils.theme import generate_adaptive_css
 
 
 @dataclass
@@ -471,8 +473,7 @@ class ServiceInfo:
                 tags_display += f" (+{len(self.tags) - 4} more)"
         
         # Build HTML widget with adaptive theming
-        from ..utils.theme import generate_adaptive_css
-        
+        # from ..utils.theme import generate_adaptive_css
         html = generate_adaptive_css('serviceinfo')
         html += f'''
         <div class="syft-widget">

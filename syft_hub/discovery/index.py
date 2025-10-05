@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set, Any
 from collections import defaultdict
 
 from ..models.service_info import ServiceInfo
-from ..core.config import SyftBoxConfig
+from syft_core import Client as SyftClient
 from ..core.types import ServiceType
 from .scanner import ServiceScanner
 from .parser import MetadataParser
@@ -20,16 +20,16 @@ logger = logging.getLogger(__name__)
 
 class ServiceIndex:
     """In-memory index of discovered services for fast searching and filtering."""
-    
-    def __init__(self, syftbox_config: SyftBoxConfig, cache_ttl: int = 300):
+
+    def __init__(self, client: SyftClient, cache_ttl: int = 300):
         """Initialize service index.
         
         Args:
-            syftbox_config: SyftBox configuration
+            client: SyftBox client
             cache_ttl: Cache time-to-live in seconds
         """
-        self.config = syftbox_config
-        self.scanner = ServiceScanner(syftbox_config)
+        self.client = client
+        self.scanner = ServiceScanner(client)
         self.parser = MetadataParser()
         self.cache_ttl = cache_ttl
         
@@ -438,9 +438,14 @@ class ServiceIndex:
 class PersistentServiceIndex(ServiceIndex):
     """Service index with disk persistence for faster startup."""
     
-    def __init__(self, syftbox_config: SyftBoxConfig, 
-                 cache_ttl: int = 300,
-                 cache_file: Optional[Path] = None):
+    def __init__(self, client: SyftClient, cache_ttl: int = 300, cache_file: Optional[Path] = None):
+        # super().__init__(client, cache_ttl)
+        
+        # if cache_file is None:
+        #     cache_file = client.workspace.data_dir / ".cache" / "service_index.json"
+    
+        # self.cache_file = Path(cache_file)
+        # self.cache_file.parent.mkdir(parents=True, exist_ok=True)
         """Initialize persistent service index.
         
         Args:
@@ -448,11 +453,11 @@ class PersistentServiceIndex(ServiceIndex):
             cache_ttl: Cache time-to-live in seconds
             cache_file: Path to cache file (defaults to ~/.syftbox/service_index.json)
         """
-        super().__init__(syftbox_config, cache_ttl)
+        super().__init__(client, cache_ttl)
         
         if cache_file is None:
-            cache_file = syftbox_config.data_dir / ".syftbox" / "service_index.json"
-        
+            cache_file = client.workspace.data_dir / ".cache" / "service_index.json"
+
         self.cache_file = Path(cache_file)
         self.cache_file.parent.mkdir(parents=True, exist_ok=True)
     

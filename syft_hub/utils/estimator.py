@@ -1,15 +1,20 @@
 """
 Cost estimation utility for SyftBox NSAI SDK services
 """
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 from ..core.types import ServiceType, PricingChargeType
 from ..core.exceptions import ValidationError
-from ..models.service_info import ServiceInfo
+
+if TYPE_CHECKING:
+    from ..models.service_info import ServiceInfo
 
 class CostEstimator:
     """Utility class for estimating service costs across different service types"""
     
     @staticmethod
-    def estimate_chat_cost(service_info: ServiceInfo, message_count: int = 1) -> float:
+    def estimate_chat_cost(service_info: 'ServiceInfo', message_count: int = 1) -> float:
         """Estimate cost for a chat request.
         
         Args:
@@ -29,7 +34,7 @@ class CostEstimator:
             return chat_service_info.pricing
     
     @staticmethod
-    def estimate_search_cost(service_info: ServiceInfo, query_count: int = 1, result_limit: int = 3) -> float:
+    def estimate_search_cost(service_info: 'ServiceInfo', query_count: int = 1, result_limit: int = 3) -> float:
         """Estimate cost for search requests.
         
         Args:
@@ -50,7 +55,7 @@ class CostEstimator:
             return search_service_info.pricing
     
     @staticmethod
-    def estimate_service_cost(service_info: ServiceInfo, service_type: ServiceType, 
+    def estimate_service_cost(service_info: 'ServiceInfo', service_type: ServiceType, 
                             message_count: int = 1, query_count: int = 1, 
                             result_limit: int = 3) -> float:
         """Generic cost estimation for any service type.
@@ -73,7 +78,7 @@ class CostEstimator:
             raise ValidationError(f"Unsupported service type for cost estimation: {service_type}")
     
     @staticmethod
-    def estimate_pipeline_cost(data_sources: list, synthesizer_service: ServiceInfo, 
+    def estimate_pipeline_cost(data_sources: list, synthesizer_service: 'ServiceInfo', 
                              message_count: int = 1) -> float:
         """Estimate total cost for a pipeline execution.
         

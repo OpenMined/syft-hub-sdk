@@ -4,16 +4,17 @@ Service class for object-oriented service interaction
 from typing import List, TYPE_CHECKING
 
 from ..core.types import ServiceType
-from ..models.service_info import ServiceInfo
+# from ..models.service_info import ServiceInfo
 from .exceptions import ServiceNotSupportedError
 
 if TYPE_CHECKING:
     from ..main import Client
+    from ..models.service_info import ServiceInfo
 
 class Service:
     """Object-oriented interface for a loaded SyftBox service."""
     
-    def __init__(self, service_info: ServiceInfo, client: 'Client'):
+    def __init__(self, service_info: 'ServiceInfo', client: 'Client'):
         self._service_info = service_info
         self._client = client
     
@@ -423,7 +424,7 @@ results = service.search(
                 from ..utils.async_utils import run_async_in_thread
                 # Use longer timeout for chat health checks as chat services may take longer to respond
                 health_status = run_async_in_thread(
-                    check_service_health(self._service_info, self._client.rpc_client, timeout=5.0, max_poll_attempts=30, poll_interval=0.5)
+                    check_service_health(self._service_info, self._client.syft_client, timeout=5.0, poll_interval=0.5)
                 )
                 self._service_info.health_status = health_status
                 
@@ -460,7 +461,7 @@ results = service.search(
             # Perform fresh health check to see if service came back online
             from ..services.health import check_service_health
             # Use longer timeout for chat health checks as chat services may take longer to respond
-            health_status = await check_service_health(self._service_info, self._client.rpc_client, timeout=5.0, max_poll_attempts=30, poll_interval=0.5)
+            health_status = await check_service_health(self._service_info, self._client.syft_client, timeout=5.0, poll_interval=0.5)
             self._service_info.health_status = health_status
             
             # If still offline after fresh check, raise error
@@ -494,7 +495,7 @@ results = service.search(
                 from ..services.health import check_service_health
                 from ..utils.async_utils import run_async_in_thread
                 health_status = run_async_in_thread(
-                    check_service_health(self._service_info, self._client.rpc_client, timeout=3.0)
+                    check_service_health(self._service_info, self._client.syft_client, timeout=3.0)
                 )
                 self._service_info.health_status = health_status
                 
@@ -530,7 +531,7 @@ results = service.search(
         if self._service_info.health_status == HealthStatus.OFFLINE:
             # Perform fresh health check to see if service came back online
             from ..services.health import check_service_health
-            health_status = await check_service_health(self._service_info, self._client.rpc_client, timeout=3.0)
+            health_status = await check_service_health(self._service_info, self._client.syft_client, timeout=3.0)
             self._service_info.health_status = health_status
             
             # If still offline after fresh check, raise error
