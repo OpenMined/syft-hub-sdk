@@ -492,7 +492,7 @@ class Client:
             health_status = await check_service_health(
                 service, 
                 self.syft_client,      
-                timeout=5.0,
+                timeout=15.0,
             )
             # Update the service object and cache with the new health status
             service.health_status = health_status
@@ -573,7 +573,7 @@ class Client:
                 health_status = await check_service_health(
                     service, 
                     self.syft_client,
-                    timeout=5.0,
+                    timeout=15.0,
                 )
                 # Update the service object and cache with the new health status
                 service.health_status = health_status
@@ -701,7 +701,7 @@ class Client:
                 health_status = await check_service_health(
                     service, 
                     self.syft_client,
-                    timeout=5.0,
+                    timeout=15.0,
                 )
                 # Update the service object and cache with the new health status
                 service.health_status = health_status
