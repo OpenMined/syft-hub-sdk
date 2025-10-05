@@ -112,7 +112,7 @@ class AccountingClient:
             )
             if e.status_code == 409:
                 raise APIException(
-                    f"User account already exists: {e.message}",
+                    f"User account already exists: {e.message}. Please use your existing password. If you forgot your password, email support@openmined.org with subject 'Forgot password'",
                     status_code=e.status_code,
                 )
             else:
