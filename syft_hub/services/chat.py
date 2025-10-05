@@ -109,7 +109,9 @@ class ChatService:
             logger.debug(f"Guest mode request to {self.service_info.datasite}/{self.service_info.name} - no accounting token available")
 
         # Add SyftBox authentication if available
-        headers = {}
+        headers = {
+            "Content-Type": "application/json"
+        }
         auth_token = await self.auth_client.get_auth_token()
         if auth_token:
             headers["Authorization"] = f"Bearer {auth_token}"

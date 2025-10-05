@@ -247,37 +247,35 @@ async def check_service_health(
             cache=False
         )
         
-        # Wait for response
+        # Wait for response (syft-rpc handles polling internally for 202 responses)
+        # Use asyncio.to_thread to avoid blocking the event loop
         response = await asyncio.to_thread(
-            future.wait,
-            timeout=timeout,
+            future.wait, 
+            timeout=timeout, 
             poll_interval=poll_interval
         )
         
-        # Interpret response status codes:
-        # - 2xx (success) = service is healthy and responding correctly
-        # - 4xx (client error) = service is alive but request format/auth issue
-        # - 5xx (server error) = service has internal problems, mark as offline
+        # Get status code
         status_code = response.status_code
         
-        # Consume the response body in the background to properly complete the RPC cycle
-        # This ensures the response is fully read and cleaned up
-        async def consume_response():
+        # Process the response body to properly complete the RPC cycle
+        try:
+            # Try to read the response body (use asyncio.to_thread to avoid blocking)
+            body = await asyncio.to_thread(response.json)
+            logger.debug(f"Service {service_info.name} health response: status={status_code}, body={body}")
+        except Exception as e:
+            # If JSON parsing fails, try text
             try:
-                # Try to read the response body
-                if hasattr(response, 'json'):
-                    try:
-                        await asyncio.to_thread(response.json)
-                    except:
-                        # If JSON parsing fails, try text
-                        if hasattr(response, 'text'):
-                            await asyncio.to_thread(response.text)
-            except Exception as e:
-                logger.debug(f"Background response consumption for {service_info.name}: {e}")
+                body = await asyncio.to_thread(response.text)
+                logger.debug(f"Service {service_info.name} health response: status={status_code}, text={body}")
+            except Exception as text_error:
+                logger.debug(f"Could not read response body for {service_info.name}: {e}")
+                body = None
         
-        # Start background consumption task (fire and forget)
-        asyncio.create_task(consume_response())
-        
+        # Interpret response status codes:
+        # - 2xx (success including 202) = service is healthy and responding correctly
+        # - 4xx (client error) = service is alive but request format/auth issue
+        # - 5xx (server error) = service has internal problems, mark as offline
         if response.is_success or (400 <= status_code < 500):
             # 2xx or 4xx: Service is responding
             if 400 <= status_code < 500:
@@ -315,7 +313,7 @@ async def batch_health_check(
     services: List[ServiceInfo],
     syft_client: SyftClient,
     timeout: float = 15.0,
-    max_concurrent: int = 10
+    max_concurrent: int = 30
 ) -> Dict[str, HealthStatus]:
     """Check health of multiple services concurrently.
     
@@ -335,7 +333,9 @@ async def batch_health_check(
     
     async def check_single_service(service: ServiceInfo) -> Tuple[str, HealthStatus]:
         async with semaphore:
+            logger.debug(f"Starting health check for {service.name}")
             health = await check_service_health(service, syft_client, timeout, show_spinner=False)
+            logger.debug(f"Completed health check for {service.name}: {health}")
             return service.name, health
     
     # Start all health checks concurrently
