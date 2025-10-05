@@ -62,6 +62,7 @@ class Client:
             accounting_client: Optional[AccountingClient] = None,
             set_accounting: bool = True,
             accounting_pass: Optional[str] = None,
+            wait_sync: bool = True,
             _auto_setup_accounting: bool = True,
             _auto_health_check_threshold: int = 10
         ):
@@ -72,6 +73,7 @@ class Client:
             accounting_client: Pre-configured AccountingClient instance
             set_accounting: Whether to set up accounting (creates account if needed)
             accounting_pass: Password for existing accounting account (required if set_accounting=True and account exists)
+            wait_sync: Whether to wait for SyftBox sync to complete before checking services (default: True)
             _auto_setup_accounting: Whether to prompt for accounting setup when needed
             _auto_health_check_threshold: Max services for auto health checking
         """
@@ -90,7 +92,7 @@ class Client:
                 f"SyftBox datasite not found at {self.syft_client.my_datasite}. "
                 "Please ensure SyftBox is running."
             )
-        
+
         # Initialize account state
         self._account_configured = False
 
@@ -145,6 +147,12 @@ class Client:
         # Set up auth clients
         self.auth_client = AuthClient(self.syft_client)
         
+        
+        # Wait for sync completion if requested (after verifying SyftBox runs, before discovery)
+        self._wait_sync = wait_sync
+        if wait_sync:
+            self._wait_for_sync_completion()
+        
         # Set up discovery services
         self._scanner = FastScanner(self.syft_client)
         self._parser = MetadataParser()
@@ -163,6 +171,68 @@ class Client:
         self._health_cache_ttl: float = 3600.0
 
         logger.info(f"Client initialized for {self.syft_client.email}")
+    
+    def _wait_for_sync_completion(self, timeout: float = 100.0, check_interval: float = 0.5):
+        """Wait for SyftBox sync to complete by monitoring the log file.
+        
+        Args:
+            timeout: Maximum time to wait for sync (default: 100 seconds)
+            check_interval: Interval between log checks (default: 0.5 seconds)
+        """
+        import os
+        
+        # Get the syftbox home directory from the config path
+        syftbox_home = os.path.dirname(self.syft_client.config_path)
+        log_path = Path(syftbox_home) / "logs" / "syftbox.log"
+        
+        # If log file doesn't exist, just return (syftbox might not be logging)
+        if not log_path.exists():
+            logger.debug(f"SyftBox log not found at {log_path}, skipping sync wait")
+            return
+        
+        # Start spinner for sync wait
+        spinner = Spinner("Waiting for SyftBox sync to complete")
+        spinner.start()
+        
+        start_time = time.time()
+        sync_completed = False
+        
+        try:
+            while time.time() - start_time < timeout:
+                try:
+                    # Read the log file to check for sync completion
+                    with open(log_path, 'r') as f:
+                        # Read from end of file for efficiency (last 10KB)
+                        f.seek(0, 2)  # Go to end
+                        file_size = f.tell()
+                        read_size = min(10240, file_size)  # Read last 10KB or whole file
+                        f.seek(max(0, file_size - read_size))
+                        recent_logs = f.read()
+                        
+                        # Check for sync completion message
+                        if 'msg="full sync completed"' in recent_logs or 'full sync completed' in recent_logs:
+                            sync_completed = True
+                            break
+                
+                except Exception as e:
+                    logger.debug(f"Error reading log file: {e}")
+                
+                # Wait before next check
+                time.sleep(check_interval)
+            
+            spinner.stop()
+            
+            if sync_completed:
+                print("✓ SyftBox sync completed")
+            else:
+                print(f"⚠️ SyftBox sync check timed out after {timeout}s, continuing anyway")
+                
+        except KeyboardInterrupt:
+            spinner.stop()
+            raise
+        except Exception as e:
+            spinner.stop()
+            logger.debug(f"Error during sync wait: {e}")
     
     def __dir__(self):
         """Control what appears in autocomplete suggestions.
