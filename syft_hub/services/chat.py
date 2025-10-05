@@ -2,6 +2,7 @@
 Chat service client using syft-rpc
 """
 import asyncio
+import json
 import logging
 from typing import Dict, Any
 
@@ -117,11 +118,19 @@ class ChatService:
             headers["x-syft-url"] = f"{syft_url}"
             headers["x-syft-from"] = f"{self.from_email}"
         
+        # Log the payload for debugging
+        logger.debug(f"Sending chat request to {syft_url}")
+        logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+        logger.debug(f"Headers: {headers}")
+        logger.debug(f"Encrypt: {encrypt}")
+        
         # Wait for response
         spinner = AsyncSpinner("Waiting for service response")
         await spinner.start_async()
         try:
             # Send request using syft-rpc
+            # NOTE: Pass the dict directly - syft-rpc's serialize() function will handle it
+            # It uses GenericModel(**payload).model_dump_json() for dicts
             future = send(
                 url=syft_url,
                 method="POST",
@@ -143,8 +152,40 @@ class ChatService:
         
         # Check status
         if response.status_code != SyftStatus.SYFT_200_OK:
+            # Try to extract error details from response body
+            error_details = f"Status code: {response.status_code}"
+            try:
+                error_body = response.json()
+                
+                if isinstance(error_body, dict):
+                    # Extract error message from common error response formats
+                    if "error" in error_body:
+                        error_details = f"{response.status_code}: {error_body['error']}"
+                    elif "message" in error_body:
+                        error_details = f"{response.status_code}: {error_body['message']}"
+                    elif "detail" in error_body:
+                        error_details = f"{response.status_code}: {error_body['detail']}"
+                    else:
+                        error_details = f"{response.status_code}: {error_body}"
+                else:
+                    error_details = f"{response.status_code}: {error_body}"
+            except Exception:
+                # Try to get raw text from response
+                try:
+                    if hasattr(response, 'text') and callable(response.text):
+                        error_details = f"{response.status_code}: {response.text()}"
+                    elif hasattr(response, 'body'):
+                        # Try to decode body if it's bytes
+                        body = response.body
+                        if isinstance(body, bytes):
+                            error_details = f"{response.status_code}: {body.decode('utf-8', errors='replace')}"
+                        else:
+                            error_details = f"{response.status_code}: {body}"
+                except Exception:
+                    pass
+            
             raise RPCError(
-                f"Chat request failed: {response.status_code}",
+                f"Chat request failed: {error_details}",
                 self.service_info.name
             )
         

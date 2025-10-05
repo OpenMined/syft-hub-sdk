@@ -357,6 +357,9 @@ class Client:
                     check_service_health(service_info, self.syft_client, timeout=15.0)
                 )
                 service_info.health_status = health_status
+                # Update cache
+                cache_key = f"{service_info.datasite}/{service_info.name}"
+                self._health_status_cache[cache_key] = (health_status, time.time())
             except Exception as e:
                 logger.debug(f"Health check failed for {service_name}: {e}")
                 # Leave health_status as None if check fails
@@ -415,6 +418,9 @@ class Client:
                 self.syft_client,      
                 timeout=5.0,
             )
+            # Update cache
+            cache_key = f"{service.datasite}/{service.name}"
+            self._health_status_cache[cache_key] = (health_status, time.time())
         
         if health_status == HealthStatus.OFFLINE:
             raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")
@@ -1561,10 +1567,14 @@ class Client:
     
     async def _add_health_status(self, services: List[ServiceInfo]) -> List[ServiceInfo]:
         """Add health status to services with progress feedback."""
-        health_status = await self._batch_health_check_with_progress(services, self.syft_client, timeout=1.5)
+        health_status = await self._batch_health_check_with_progress(services, self.syft_client, timeout=15.0)
         
         for service in services:
-            service.health_status = health_status.get(service.name, HealthStatus.UNKNOWN)
+            status = health_status.get(service.name, HealthStatus.UNKNOWN)
+            service.health_status = status
+            # Update cache for each service
+            cache_key = f"{service.datasite}/{service.name}"
+            self._health_status_cache[cache_key] = (status, time.time())
         
         return services
     

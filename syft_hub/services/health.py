@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from syft_core import Client as SyftClient
 from syft_rpc.rpc import send, make_url
-from syft_rpc.protocol import SyftTimeoutError
+from syft_rpc.protocol import SyftTimeoutError, SyftStatus
 
 from ..core.types import HealthStatus
 from ..models.service_info import ServiceInfo
@@ -248,27 +248,47 @@ async def check_service_health(
         )
         
         # Wait for response
-        # response = future.wait(timeout=timeout, poll_interval=poll_interval)
         response = await asyncio.to_thread(
             future.wait,
             timeout=timeout,
-            poll_interval=0.25
+            poll_interval=poll_interval
         )
         
-        # Check response status
-        if not response.is_success:
-            logger.warning(f"Service {service_info.name} returned {response.status_code} - marking OFFLINE")
-            return HealthStatus.OFFLINE
+        # Interpret response status codes:
+        # - 2xx (success) = service is healthy and responding correctly
+        # - 4xx (client error) = service is alive but request format/auth issue
+        # - 5xx (server error) = service has internal problems, mark as offline
+        status_code = response.status_code
         
-        # Parse response body
-        body = response.json()
-        status = body.get("status", "unknown").lower()
+        # Consume the response body in the background to properly complete the RPC cycle
+        # This ensures the response is fully read and cleaned up
+        async def consume_response():
+            try:
+                # Try to read the response body
+                if hasattr(response, 'json'):
+                    try:
+                        await asyncio.to_thread(response.json)
+                    except:
+                        # If JSON parsing fails, try text
+                        if hasattr(response, 'text'):
+                            await asyncio.to_thread(response.text)
+            except Exception as e:
+                logger.debug(f"Background response consumption for {service_info.name}: {e}")
         
-        if status in ["ok", "healthy"]:
+        # Start background consumption task (fire and forget)
+        asyncio.create_task(consume_response())
+        
+        if response.is_success or (400 <= status_code < 500):
+            # 2xx or 4xx: Service is responding
+            if 400 <= status_code < 500:
+                logger.info(f"Service {service_info.name} responded with {status_code} (client error but service is alive) - marking ONLINE")
+            else:
+                logger.info(f"Service {service_info.name} responded with {status_code} - marking ONLINE")
             return HealthStatus.ONLINE
         else:
-            logger.warning(f"Service {service_info.name} returned unexpected status: {status}")
-            return HealthStatus.UNKNOWN
+            # 5xx or other error codes indicate service problems
+            logger.warning(f"Service {service_info.name} returned {status_code} (server error) - marking OFFLINE")
+            return HealthStatus.OFFLINE
     
     except SyftTimeoutError:
         logger.warning(f"Service {service_info.name} timeout - marking OFFLINE")

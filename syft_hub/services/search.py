@@ -2,6 +2,7 @@
 Search service client using syft-rpc
 """
 import asyncio
+import json
 import logging
 from typing import Dict, Any
 
@@ -126,6 +127,8 @@ class SearchService:
         await spinner.start_async()
         try:
             # Send request using syft-rpc
+            # NOTE: Pass the dict directly - syft-rpc's serialize() function will handle it
+            # It uses GenericModel(**payload).model_dump_json() for dicts
             future = send(
                 url=syft_url,
                 method="POST",
@@ -147,8 +150,25 @@ class SearchService:
         
         # Check status
         if response.status_code != SyftStatus.SYFT_200_OK:
+            # Try to extract error details from response body
+            error_details = f"Status code: {response.status_code}"
+            try:
+                error_body = response.json()
+                if isinstance(error_body, dict):
+                    # Extract error message from common error response formats
+                    if "error" in error_body:
+                        error_details = f"{response.status_code}: {error_body['error']}"
+                    elif "message" in error_body:
+                        error_details = f"{response.status_code}: {error_body['message']}"
+                    elif "detail" in error_body:
+                        error_details = f"{response.status_code}: {error_body['detail']}"
+                    else:
+                        error_details = f"{response.status_code}: {error_body}"
+            except Exception as e:
+                logger.debug(f"Could not parse error response body: {e}")
+            
             raise RPCError(
-                f"Search request failed: {response.status_code}",
+                f"Search request failed: {error_details}",
                 self.service_info.name
             )
         
