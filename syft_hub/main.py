@@ -83,8 +83,14 @@ class Client:
         except Exception as e:
             raise SyftBoxNotFoundError(f"Failed to load SyftBox config: {e}")
         
-        # Bootstrap encryption keys
-        self.syft_client = ensure_bootstrap(self.syft_client)
+        # Bootstrap encryption keys - suppress verbose logging
+        crypto_logger = logging.getLogger('syft_crypto')
+        original_level = crypto_logger.level
+        crypto_logger.setLevel(logging.WARNING)
+        try:
+            self.syft_client = ensure_bootstrap(self.syft_client)
+        finally:
+            crypto_logger.setLevel(original_level)
         
         # Verify SyftBox is running by checking datasite exists
         if not self.syft_client.my_datasite.exists():
