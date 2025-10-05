@@ -488,7 +488,8 @@ class Client:
                 self.syft_client,      
                 timeout=5.0,
             )
-            # Update cache
+            # Update the service object and cache with the new health status
+            service.health_status = health_status
             cache_key = f"{service.datasite}/{service.name}"
             self._health_status_cache[cache_key] = (health_status, time.time())
         
@@ -556,16 +557,22 @@ class Client:
             service = self.get_service(service_name)
             logger.info(f"Using service: {service.name} from datasite: {service.datasite}")
             
-            # Check if service is online - use cached status if available, otherwise query
-            if service.health_status and service.health_status != HealthStatus.UNKNOWN:
+            # Check if service is online - only check health if cached status is UNKNOWN or OFFLINE  
+            if service.health_status == HealthStatus.ONLINE:
+                # Use cached ONLINE status, skip health check
                 health_status = service.health_status
             else:
+                # Perform health check for UNKNOWN, OFFLINE, or None status
                 # Use longer timeout for chat health checks as chat services may take longer to respond
                 health_status = await check_service_health(
                     service, 
                     self.syft_client,
                     timeout=5.0,
                 )
+                # Update the service object and cache with the new health status
+                service.health_status = health_status
+                cache_key = f"{service.datasite}/{service.name}"
+                self._health_status_cache[cache_key] = (health_status, time.time())
 
             if health_status == HealthStatus.OFFLINE:
                 raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")
@@ -679,15 +686,21 @@ class Client:
             service = self.get_service(service_name)
             logger.info(f"Using service: {service.name} from datasite: {service.datasite}") 
             
-            # Check if service is online - use cached status if available, otherwise query
-            if service.health_status and service.health_status != HealthStatus.UNKNOWN:
+            # Check if service is online - only check health if cached status is UNKNOWN or OFFLINE  
+            if service.health_status == HealthStatus.ONLINE:
+                # Use cached ONLINE status, skip health check
                 health_status = service.health_status
             else:
+                # Perform health check for UNKNOWN, OFFLINE, or None status
                 health_status = await check_service_health(
                     service, 
                     self.syft_client,
                     timeout=5.0,
                 )
+                # Update the service object and cache with the new health status
+                service.health_status = health_status
+                cache_key = f"{service.datasite}/{service.name}"
+                self._health_status_cache[cache_key] = (health_status, time.time())
             
             if health_status == HealthStatus.OFFLINE:
                 raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")
@@ -770,19 +783,13 @@ class Client:
         if service.health_status == HealthStatus.ONLINE:
             # Use cached ONLINE status, skip health check
             health_status = service.health_status
-        elif service.health_status is None or service.health_status in (HealthStatus.UNKNOWN, HealthStatus.OFFLINE):
+        else:
             # Perform health check for UNKNOWN, OFFLINE, or None status
             health_status = await check_service_health(service, self.syft_client, timeout=15.0)
+            # Update the service object and cache with the new health status
             service.health_status = health_status
-            # Update cache for consistent health status
             cache_key = f"{service.datasite}/{service.name}"
             self._health_status_cache[cache_key] = (health_status, time.time())
-        else:
-            health_status = await check_service_health(
-                service, 
-                self.syft_client,
-                timeout=5.0,
-            )
         
         if health_status == HealthStatus.OFFLINE:
             raise ServiceNotFoundError("The node is offline. Please retry or find a different service to use")

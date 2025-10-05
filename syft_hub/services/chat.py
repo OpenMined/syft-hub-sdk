@@ -131,8 +131,6 @@ class ChatService:
         await spinner.start_async()
         try:
             # Send request using syft-rpc
-            # NOTE: Pass the dict directly - syft-rpc's serialize() function will handle it
-            # It uses GenericModel(**payload).model_dump_json() for dicts
             future = send(
                 url=syft_url,
                 method="POST",
