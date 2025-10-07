@@ -7,6 +7,8 @@ import asyncio
 import logging
 import hashlib
 import time
+import contextlib
+import io
 
 from typing import List, Optional, Dict, Any, Union, Awaitable
 from pathlib import Path
@@ -83,12 +85,14 @@ class Client:
         except Exception as e:
             raise SyftBoxNotFoundError(f"Failed to load SyftBox config: {e}")
         
-        # Bootstrap encryption keys - suppress verbose logging
+        # Bootstrap encryption keys - suppress verbose logging and any stdout/stderr noise
         crypto_logger = logging.getLogger('syft_crypto')
         original_level = crypto_logger.level
         crypto_logger.setLevel(logging.WARNING)
+        _null_stream = io.StringIO()
         try:
-            self.syft_client = ensure_bootstrap(self.syft_client)
+            with contextlib.redirect_stdout(_null_stream), contextlib.redirect_stderr(_null_stream):
+                self.syft_client = ensure_bootstrap(self.syft_client)
         finally:
             crypto_logger.setLevel(original_level)
         

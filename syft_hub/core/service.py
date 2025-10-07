@@ -697,7 +697,7 @@ results = service.search(
                 service_code_parts.extend([
                     "",
                     "# Basic chat - complete example",
-                    f'response = await service.chat(messages=[{{"role": "user", "content": "Hello! How can you help me?"}}])',
+                    f'response = await service.chat_async(messages=[{{"role": "user", "content": "Hello! How can you help me?"}}])',
                     'print(response.content)  # Access the response text',
                     'print(f"Cost: ${response.cost}")  # Check the cost',
                     "",

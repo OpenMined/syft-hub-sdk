@@ -227,6 +227,8 @@ class PipelineResult:
         try:
             from IPython.display import display, HTML
             import markdown2
+            import html
+            import uuid
         except ImportError:
             try:
                 from IPython.display import display, HTML
@@ -269,15 +271,23 @@ class PipelineResult:
         else:
             formatted_content = '<em>No response generated</em>'
         
-        # Prepare search results HTML to match SearchResponse style
+        # Prepare search results HTML: collapsible, show all on toggle
+        widget_id = str(uuid.uuid4())[:8]
         search_results_html = ""
         if self.search_results:
-            search_results_html = "<div class='sources-list'>"
-            for i, result in enumerate(self.search_results[:3], 1):
+            # Toggle control
+            toggle_text = f"See sources ({len(self.search_results)})"
+            search_results_html += f"""
+            <div class='sources-toggle' onclick='toggleSources_{widget_id}()' style='cursor: pointer; user-select: none; margin: 4px 0;'>
+                <span id='sources-toggle-icon-{widget_id}'>▶</span>
+                <span id='sources-toggle-text-{widget_id}' style='color: var(--syft-primary, #0066cc); margin-left: 4px;'>{toggle_text}</span>
+            </div>
+            <div id='sources-list-{widget_id}' class='sources-list' style='display: none;'>
+            """
+            for i, result in enumerate(self.search_results, 1):
                 filename = result.metadata.get('filename', 'Unknown') if result.metadata else 'Unknown'
                 content = result.content[:100] + "..." if len(result.content) > 100 else result.content
                 content = html.escape(content)
-                
                 search_results_html += f"""
                 <div class='source-item'>
                     <div class='source-header'>
@@ -287,10 +297,26 @@ class PipelineResult:
                     <div class='source-preview'>{content}</div>
                 </div>
                 """
-            
-            if len(self.search_results) > 3:
-                search_results_html += f"<div class='more-sources'>... and {len(self.search_results) - 3} more results</div>"
             search_results_html += "</div>"
+            # JS toggle function for this widget instance
+            search_results_html += f"""
+            <script>
+            function toggleSources_{widget_id}() {{
+                var list = document.getElementById('sources-list-{widget_id}');
+                var icon = document.getElementById('sources-toggle-icon-{widget_id}');
+                var text = document.getElementById('sources-toggle-text-{widget_id}');
+                if (list.style.display === 'none') {{
+                    list.style.display = 'block';
+                    icon.textContent = '▼';
+                    text.textContent = 'Hide sources';
+                }} else {{
+                    list.style.display = 'none';
+                    icon.textContent = '▶';
+                    text.textContent = 'See sources ({len(self.search_results)})';
+                }}
+            }}
+            </script>
+            """
         else:
             search_results_html = "<div class='no-sources'>No documents found</div>"
         
@@ -398,8 +424,7 @@ class PipelineResult:
                 font-family: inherit;
                 font-size: 11px;
                 color: var(--syft-text-color, #495057);
-                white-space: pre-wrap;
-                max-height: 200px;
+                max-height: 400px;
                 overflow-y: auto;
                 margin-top: 4px;
             }}

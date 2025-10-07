@@ -697,7 +697,7 @@ class ServiceInfo:
         if service_type == "chat":
             code_parts.extend([
                 '# Basic chat example',
-                'response = await service.chat(',
+                'response = await service.chat_async(',
                 '    messages=[',
                 '        {"role": "user", "content": "Hello! How can you help me?"}',
                 '    ]',
@@ -706,7 +706,7 @@ class ServiceInfo:
                 'print(f"Cost: ${response.cost}")  # Check cost',
                 '',
                 '# Advanced chat with parameters',
-                'response = await service.chat(',
+                'response = await service.chat_async(',
                 '    messages=[',
                 '        {"role": "system", "content": "You are a helpful assistant"},',
                 '        {"role": "user", "content": "Explain machine learning"}',
@@ -719,12 +719,12 @@ class ServiceInfo:
         elif service_type == "search":
             code_parts.extend([
                 '# Basic search example',
-                'results = await service.search("machine learning")',
+                'results = await service.search_async("machine learning")',
                 'for result in results:',
                 '    print(f"Score: {result.score:.3f} - {result.content[:100]}...")',
                 '',
                 '# Advanced search with parameters',
-                'results = await service.search(',
+                'results = await service.search_async(',
                 '    message="artificial intelligence research",',
                 '    topK=10,',
                 '    similarity_threshold=0.8',
