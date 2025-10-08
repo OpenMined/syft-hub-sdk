@@ -6,9 +6,40 @@ import functools
 
 from typing import Callable, Any
 
+from syft_core import Client as SyftClient
+from .exceptions import AuthenticationError, SyftBoxNotRunningError
 from ..utils.async_utils import detect_async_context, run_async_in_thread
-from .exceptions import AuthenticationError
 
+
+def ensure_syftbox_running(func):
+    """
+    Decorator to check if the local SyftBox is running before executing
+    an asynchronous service client method.
+    """
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        # The 'self' argument (the service instance) is always the first positional argument
+        if not args:
+            raise TypeError(f"'{func.__name__}' must be called as a method (i.e., requires 'self').")
+            
+        service_instance = args[0]
+        
+        # Access the syft_client from the service instance (e.g., self.syft_client)
+        if not hasattr(service_instance, 'syft_client') or not isinstance(service_instance.syft_client, SyftClient):
+            raise AttributeError(f"Service instance {service_instance.__class__.__name__} lacks a valid 'syft_client' attribute.")
+
+        syft_client = service_instance.syft_client
+        
+        # Perform the actual check
+        if not syft_client.my_datasite.exists():
+            raise SyftBoxNotRunningError(
+                message="Local SyftBox is not running. Cannot send RPC request."
+            )
+            
+        # If the check passes, execute the original async function
+        return await func(*args, **kwargs)
+
+    return wrapper
 
 def require_account(func: Callable) -> Callable:
     """Decorator that requires account setup before service operations.
