@@ -45,6 +45,11 @@ dependencies = [
     "markdown2>=2.5.4",
 ]
 
+[project.optional-dependencies]
+installer = [
+    "syft-installer>=0.9.1",
+]
+
 [project.urls]
 Homepage = "https://syftbox.openmined.org"
 Documentation = "https://docs.syftbox.openmined.org/nsai-sdk"

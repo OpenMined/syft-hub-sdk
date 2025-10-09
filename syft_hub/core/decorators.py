@@ -3,6 +3,7 @@ Decorators for SyftBox SDK
 """
 import asyncio
 import functools
+import logging
 
 from typing import Callable, Any
 
@@ -10,34 +11,84 @@ from syft_core import Client as SyftClient
 from .exceptions import AuthenticationError, SyftBoxNotRunningError
 from ..utils.async_utils import detect_async_context, run_async_in_thread
 
+logger = logging.getLogger(__name__)
+# Configuration for robust polling
+MAX_WAIT_SECONDS = 10
+POLL_INTERVAL_SECONDS = 0.5
 
 def ensure_syftbox_running(func):
     """
     Decorator to check if the local SyftBox is running before executing
-    an asynchronous service client method.
+    an asynchronous service client method. Attempts automatic restart if 'syft-installer' 
+    is available (i.e., installed via the [installer] extra).
     """
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        # The 'self' argument (the service instance) is always the first positional argument
         if not args:
-            raise TypeError(f"'{func.__name__}' must be called as a method (i.e., requires 'self').")
+            raise TypeError(f"'{func.__name__}' must be called as a method.")
             
         service_instance = args[0]
-        
-        # Access the syft_client from the service instance (e.g., self.syft_client)
-        if not hasattr(service_instance, 'syft_client') or not isinstance(service_instance.syft_client, SyftClient):
-            raise AttributeError(f"Service instance {service_instance.__class__.__name__} lacks a valid 'syft_client' attribute.")
-
         syft_client = service_instance.syft_client
+
+        # If the datasite is already available, proceed
+        if syft_client.my_datasite.exists():
+            return await func(*args, **kwargs) 
         
-        # Perform the actual check
-        if not syft_client.my_datasite.exists():
-            raise SyftBoxNotRunningError(
-                message="Local SyftBox is not running. Cannot send RPC request."
-            )
+        try:
+            # Attempting this import implements the "Optional Dependency" principle.
+            import syft_installer as si
             
-        # If the check passes, execute the original async function
-        return await func(*args, **kwargs)
+            logger.warning("SyftBox daemon is stopped. Attempting automatic restart via syft-installer.")
+
+            # Use the public API method to start SyftBox if it's currently stopped.
+            # This is non-blocking and attempts to start the daemon in the background.
+            started_daemon = si.run_if_stopped() 
+
+            if started_daemon:
+                logger.info("SyftBox restart triggered. Polling for successful startup...")
+                
+                # Robust Polling Loop: Replaces fixed 'sleep(2)' with a timeout
+                poll_attempts = int(MAX_WAIT_SECONDS / POLL_INTERVAL_SECONDS)
+                
+                for i in range(poll_attempts):
+                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                    
+                    if syft_client.my_datasite.exists():
+                        logger.info("SyftBox successfully restarted. Retrying RPC request.")
+                        return await func(*args, **kwargs)
+                        
+                # If the loop finishes without success
+                raise SyftBoxNotRunningError(
+                    f"Automatic restart failed after polling for {MAX_WAIT_SECONDS}s. Daemon is installed but won't start. Check installation and logs."
+                )
+
+            # Case: Installer is present, but run_if_stopped() returned False.
+            elif not si.is_installed():
+                # Provide a specific error if the installer package is installed but SyftBox isn't.
+                raise SyftBoxNotRunningError(
+                    "SyftBox is not installed. Daemon cannot be started. Run `import syft_installer as si; si.run()` to complete setup."
+                )
+            
+            # Catch other unexpected errors from the installer itself
+            else:
+                 raise SyftBoxNotRunningError("SyftBox automatic restart failed due to an unknown installer error.")
+
+        except ImportError:
+            # Installer Not Present (Fail Gracefully) ---
+            # This handles the "Default User" profile, providing clear instructions.
+            manual_instructions = (
+                "Local SyftBox is not running. The 'syft-installer' installer package is not installed. "
+                "To enable automatic restart, install the extra dependency: "
+                "pip install syft-hub-sdk[installer]"
+            )
+            raise SyftBoxNotRunningError(manual_instructions)
+
+        except Exception as e:
+            # Catch any other runtime error (e.g., permissions, bad configuration)
+            raise SyftBoxNotRunningError(
+                f"Automatic restart attempt failed with a runtime error: {type(e).__name__}: {e}. "
+                "You may need to manually run `import syft_installer as si; si.status()` for diagnostics."
+            )
 
     return wrapper
 
