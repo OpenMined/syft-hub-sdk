@@ -12,6 +12,7 @@ from syft_rpc.protocol import SyftStatus
 
 from ..clients import AccountingClient, AuthClient
 from ..core.types import ServiceType
+from ..core.decorators import ensure_syftbox_running
 from ..core.exceptions import RPCError, TransactionTokenCreationError, ValidationError, ServiceNotSupportedError
 from ..models.responses import SearchResponse
 from ..models.service_info import ServiceInfo
@@ -49,6 +50,7 @@ class SearchService:
         # Get user email from SyftBox auth (with guest fallback)
         self.from_email = self.auth_client.get_user_email()
 
+    @ensure_syftbox_running
     async def search_with_params(self, params: Dict[str, Any], encrypt: bool = False) -> SearchResponse:
         """Send search request with parameters.
         

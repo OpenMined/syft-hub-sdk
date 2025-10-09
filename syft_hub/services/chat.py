@@ -11,6 +11,7 @@ from syft_rpc.rpc import send, make_url
 from syft_rpc.protocol import SyftStatus
 
 from ..clients import AccountingClient, AuthClient
+from ..core.decorators import ensure_syftbox_running
 from ..core.types import ChatMessage, ServiceType
 from ..core.exceptions import RPCError, ValidationError, ServiceNotSupportedError, TransactionTokenCreationError
 from ..models.responses import ChatResponse
@@ -49,6 +50,7 @@ class ChatService:
         # Get user email from SyftBox auth (with guest fallback)
         self.from_email = self.auth_client.get_user_email()
 
+    @ensure_syftbox_running
     async def chat_with_params(self, params: Dict[str, Any], encrypt: bool = False) -> ChatResponse:
         """Send chat request with parameters.
         
