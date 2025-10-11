@@ -1,0 +1,299 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: 'Create as draft'
+        required: false
+        default: false
+        type: boolean
+      publish_to_pypi:
+        description: 'Automatically publish to PyPI after release'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      release_id: ${{ steps.create_release.outputs.id }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+        ref: ${{ github.ref }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python 3.12
+      run: uv python install 3.12
+
+    - name: Create virtual environment
+      run: uv venv .venv --python 3.12
+
+    - name: Install dependencies
+      run: uv sync
+
+    - name: Configure Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+    - name: Get current version and bump
+      id: version
+      run: |
+        # Get current version
+        CURRENT_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+        echo "Current version: $CURRENT_VERSION"
+        
+        # Parse version components
+        IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+        MAJOR=${VERSION_PARTS[0]}
+        MINOR=${VERSION_PARTS[1]}
+        PATCH=${VERSION_PARTS[2]}
+        
+        # Bump version based on input
+        case "${{ github.event.inputs.version_bump }}" in
+          "major")
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            ;;
+          "minor")
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            ;;
+          "patch")
+            PATCH=$((PATCH + 1))
+            ;;
+        esac
+        
+        NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+        echo "New version: $NEW_VERSION"
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        
+        # Update pyproject.toml
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
+        else
+          sed -i "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
+        fi
+        
+        echo "✅ Version updated in pyproject.toml"
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Create a simple changelog entry
+        CHANGELOG_FILE="CHANGELOG_TEMP.md"
+        
+        cat > $CHANGELOG_FILE << EOF
+        ## 🚀 What's Changed in v${{ steps.version.outputs.new_version }}
+        
+        ### 📋 Changes
+        $(git log --oneline $(git describe --tags --abbrev=0 2>/dev/null || echo "HEAD~10")..HEAD | sed 's/^/- /' || echo "- Initial release")
+        
+        ### 📦 Installation
+        \`\`\`bash
+        pip install syft-hub==${{ steps.version.outputs.new_version }}
+        \`\`\`
+        
+        ### 🔗 Full Changelog
+        **Full Changelog**: https://github.com/${{ github.repository }}/compare/$(git describe --tags --abbrev=0 2>/dev/null || echo "HEAD~1")...v${{ steps.version.outputs.new_version }}
+        EOF
+        
+        echo "changelog_file=$CHANGELOG_FILE" >> $GITHUB_OUTPUT
+
+    - name: Build package
+      run: |
+        # Install build tools
+        uv pip install build twine
+        
+        # Clean and build
+        rm -rf dist/ build/ *.egg-info
+        uv run python -m build
+        
+        # Verify build
+        uv run twine check dist/*
+        
+        echo "✅ Package built successfully"
+        ls -la dist/
+
+    - name: Commit version bump
+      run: |
+        git add pyproject.toml
+        git commit -m "🔖 Bump version to ${{ steps.version.outputs.new_version }}"
+        
+        # Retry push with rebase if needed
+        for i in {1..3}; do
+          if git push origin HEAD:${{ github.ref_name }}; then
+            echo "✅ Version bump committed and pushed"
+            break
+          else
+            echo "Push failed (attempt $i/3), rebasing..."
+            git fetch origin
+            git rebase origin/${{ github.ref_name }}
+            if [ $i -eq 3 ]; then
+              echo "❌ Failed to push after 3 attempts"
+              exit 1
+            fi
+          fi
+        done
+
+    - name: Create Git tag
+      run: |
+        git tag -a "v${{ steps.version.outputs.new_version }}" -m "Release v${{ steps.version.outputs.new_version }}"
+        git push origin "v${{ steps.version.outputs.new_version }}"
+        echo "✅ Git tag created and pushed"
+
+    - name: Create GitHub Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version.outputs.new_version }}
+        release_name: Release v${{ steps.version.outputs.new_version }}
+        body_path: ${{ steps.changelog.outputs.changelog_file }}
+        draft: ${{ github.event.inputs.draft }}
+        prerelease: ${{ github.event.inputs.prerelease }}
+
+    - name: Package distribution files
+      run: |
+        cd dist
+        zip -r ../syft-hub-${{ steps.version.outputs.new_version }}-dist.zip .
+        cd ..
+
+    - name: Upload Release Assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: syft-hub-${{ steps.version.outputs.new_version }}-dist.zip
+        asset_name: syft-hub-${{ steps.version.outputs.new_version }}-dist.zip
+        asset_content_type: application/zip
+
+    - name: Upload wheel
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: dist/syft_hub-${{ steps.version.outputs.new_version }}-py3-none-any.whl
+        asset_name: syft_hub-${{ steps.version.outputs.new_version }}-py3-none-any.whl
+        asset_content_type: application/x-wheel+zip
+
+    - name: Upload source distribution
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: dist/syft_hub-${{ steps.version.outputs.new_version }}.tar.gz
+        asset_name: syft_hub-${{ steps.version.outputs.new_version }}.tar.gz
+        asset_content_type: application/gzip
+
+  publish-to-pypi:
+    runs-on: ubuntu-latest
+    needs: create-release
+    if: github.event.inputs.publish_to_pypi == 'true' && github.event.inputs.draft != 'true'
+    environment: pypi
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: v${{ needs.create-release.outputs.new_version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python 3.12
+      run: uv python install 3.12
+
+    - name: Create virtual environment
+      run: uv venv .venv --python 3.12
+
+    - name: Install dependencies
+      run: uv sync
+
+    - name: Install build and publish tools
+      run: uv pip install build twine
+
+    - name: Build package
+      run: |
+        rm -rf dist/ build/ *.egg-info
+        uv run python -m build
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        echo "🚀 Publishing v${{ needs.create-release.outputs.new_version }} to PyPI..."
+        uv run twine upload dist/*
+        echo "✅ Successfully published to PyPI!"
+
+    - name: Update release with PyPI info
+      run: |
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        # 🎉 Release v${{ needs.create-release.outputs.new_version }} Published!
+        
+        ## 📦 PyPI Package
+        - **Package**: \`syft-hub\`
+        - **Version**: \`${{ needs.create-release.outputs.new_version }}\`
+        - **PyPI**: https://pypi.org/project/syft-hub/${{ needs.create-release.outputs.new_version }}/
+        
+        ## 📥 Installation
+        \`\`\`bash
+        pip install syft-hub==${{ needs.create-release.outputs.new_version }}
+        \`\`\`
+        
+        ## 🔗 Links
+        - [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.create-release.outputs.new_version }})
+        - [PyPI Package](https://pypi.org/project/syft-hub/${{ needs.create-release.outputs.new_version }}/)
+        EOF
+
+  notify-completion:
+    runs-on: ubuntu-latest
+    needs: [create-release, publish-to-pypi]
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: needs.create-release.result == 'success'
+      run: |
+        echo "✅ Release v${{ needs.create-release.outputs.new_version }} created successfully!"
+        if [ "${{ needs.publish-to-pypi.result }}" == "success" ]; then
+          echo "✅ Package published to PyPI!"
+        elif [ "${{ github.event.inputs.publish_to_pypi }}" == "false" ]; then
+          echo "ℹ️  PyPI publishing was disabled"
+        fi
+        
+    - name: Notify failure
+      if: needs.create-release.result == 'failure'
+      run: |
+        echo "❌ Release creation failed!"
+        echo "Check the logs above for details."

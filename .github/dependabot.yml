@@ -1,0 +1,79 @@
+# Dependabot configuration for automated dependency updates
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "SyftBox Team"
+    assignees:
+      - "SyftBox Team"
+    commit-message:
+      prefix: "⬆️"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "python"
+    # Group related updates
+    groups:
+      dev-dependencies:
+        patterns:
+          - "jupyter*"
+          - "ipython*"
+          - "ipykernel*"
+          - "matplotlib*"
+          - "black*"
+          - "pytest*"
+          - "mypy*"
+        update-types:
+          - "minor"
+          - "patch"
+      security-updates:
+        patterns:
+          - "cryptography*"
+          - "requests*"
+          - "urllib3*"
+        update-types:
+          - "patch"
+      web-framework:
+        patterns:
+          - "fastapi*"
+          - "uvicorn*"
+          - "httpx*"
+          - "aiohttp*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "SyftBox Team"
+    commit-message:
+      prefix: "⬆️"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"

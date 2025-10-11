@@ -3,28 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SyftHub SDK - Federated AI with Attribution Control</title>
+    <title>syft-hub SDK - Run decentralised AI on private data</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <div class="beta-banner">
+        <div class="beta-container">
+            <span class="beta-badge">BETA</span>
+            <span>syft-hub SDK is in beta. Payments are disabled during beta; enjoy $20 in free credits.</span>
+        </div>
+    </div>
     <!-- Header -->
     <header class="header">
         <div class="header-container">
             <a href="index.html" class="logo">
-                <svg width="32" height="32" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="100" height="100" rx="20" fill="#000"/>
-                    <path d="M30 35 L50 20 L70 35 L70 65 L50 80 L30 65 Z" stroke="#fff" stroke-width="3" fill="none"/>
-                    <circle cx="50" cy="50" r="8" fill="#fff"/>
-                </svg>
-                <span>SyftHub SDK</span>
+                <img width="32" height="32" src="syftbox-logo.svg" alt="SyftHub Logo">
+                <span>syft-hub SDK</span>
             </a>
             <nav class="nav">
                 <a href="index.html" class="active">Home</a>
+                <a href="quickstart.html">Quickstart</a>
+                <a href="ai-services.html">Concepts</a>
                 <a href="authentication.html">Authentication</a>
-                <a href="ai-services.html">AI Services</a>
+                <a href="get-syftbox.html" class="pill">Get SyftBox</a>
                 <a href="https://github.com/OpenMined/syft-nsai-sdk" target="_blank" class="github-link">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
@@ -37,28 +41,27 @@
     <!-- Hero -->
     <section class="hero">
         <div class="hero-container">
-            <h1>Federated AI with Attribution Control</h1>
-            <p class="hero-description">
-                Execute privacy-preserving queries across distributed data sources with transparent attribution tracking.
-            </p>
+            <h1>syft-hub SDK</h1>
+            <p class="hero-description">Run decentralised AI on a network of private data and models — easy in Python.</p>
+            
         </div>
     </section>
 
     <!-- Main Content -->
     <main class="main">
-        <!-- Quickstart -->
+        <!-- Overview -->
         <section class="content-section">
             <div class="section-header">
                 <h2>Quickstart</h2>
-                <p>Get up and running in under 5 minutes</p>
+                <button class="button button-secondary" id="copy-all-quickstart-home" aria-label="Copy all quickstart code">Copy All</button>
             </div>
 
-            <div class="steps">
+            <div class="steps steps-2of3">
                 <div class="step">
                     <div class="step-number">1</div>
                     <div class="step-content">
                         <h3>Install</h3>
-                        <p>Install the SyftHub SDK using pip:</p>
+                        <p>Install the syft-hub SDK using pip:</p>
                         <pre><code>pip install syft-hub</code></pre>
                     </div>
                 </div>
@@ -79,55 +82,26 @@ client = Client()
                 <div class="step">
                     <div class="step-number">3</div>
                     <div class="step-content">
-                        <h3>Authenticate</h3>
-                        <p>Connect your account to access services:</p>
-                        <pre><code><span class="comment"># Register new account</span>
-client.register_accounting(
-    email=<span class="string">"your.email@example.com"</span>,
-    password=<span class="string">"secure_password"</span>
-)
-
-<span class="comment"># Or connect existing account</span>
-client.connect_accounting(
-    email=<span class="string">"your.email@example.com"</span>,
-    password=<span class="string">"your_password"</span>
-)</code></pre>
+                        <h3>Discover Available Data & Models</h3>
+                        <pre><code><span class="comment"># In Jupyter notebooks</span>
+client.show_services()</code></pre>
                     </div>
                 </div>
 
                 <div class="step">
                     <div class="step-number">4</div>
+                   
+               
                     <div class="step-content">
-                        <h3>Discover Services</h3>
-                        <p>Find available AI services and data sources:</p>
-                        <pre><code><span class="comment"># List all available services</span>
-services = client.list_services()
-<span class="keyword">print</span>(f<span class="string">"Found {len(services)} services"</span>)
-
-<span class="comment"># In Jupyter notebooks</span>
-client.show_services()  <span class="comment"># Interactive widget</span></code></pre>
-                    </div>
-                </div>
-
-                <div class="step">
-                    <div class="step-number">5</div>
-                    <div class="step-content">
-                        <h3>Load Services</h3>
-                        <p>Load specific services for your pipeline:</p>
+                        <h3>Run Your First Query</h3>
+                        <p>Create a pipeline and execute a federated query:</p>
                         <pre><code><span class="comment"># Load a data source</span>
 data_source = client.load_service(<span class="string">"irina@openmined.org/openmined-blog"</span>)
 
 <span class="comment"># Load an AI model</span>
-llm = client.load_service(<span class="string">"aggregator@openmined.org/claude-sonnet-3.5"</span>)</code></pre>
-                    </div>
-                </div>
+llm = client.load_service(<span class="string">"aggregator@openmined.org/claude-sonnet-3.5"</span>)
 
-                <div class="step">
-                    <div class="step-number">6</div>
-                    <div class="step-content">
-                        <h3>Run Your First Query</h3>
-                        <p>Create a pipeline and execute a federated query:</p>
-                        <pre><code><span class="comment"># Create attribution pipeline</span>
+<span class="comment"># Create federated pipeline</span>
 pipeline = client.pipeline(
     data_sources=[data_source],
     synthesizer=llm
@@ -136,78 +110,20 @@ pipeline = client.pipeline(
 <span class="comment"># Execute query</span>
 response = pipeline.run(messages=[
     {<span class="string">"role"</span>: <span class="string">"user"</span>, <span class="string">"content"</span>: <span class="string">"What is federated learning?"</span>}
-])
-
-<span class="comment"># View results</span>
-<span class="keyword">print</span>(f<span class="string">"Answer: {response.content}"</span>)
-<span class="keyword">print</span>(f<span class="string">"Cost: ${response.total_cost}"</span>)
-<span class="keyword">print</span>(f<span class="string">"Sources: {response.sources}"</span>)</code></pre>
+])</code></pre>
                     </div>
                 </div>
-            </div>
-        </section>
-
-        <!-- Complete Example -->
-        <section class="content-section">
-            <div class="section-header">
-                <h2>Complete Example</h2>
-                <p>Everything together in one script</p>
-            </div>
-
-            <div class="code-showcase">
-                <pre><code><span class="keyword">from</span> syft_hub <span class="keyword">import</span> Client
-
-<span class="comment"># Initialize and authenticate</span>
-client = Client()
-client.connect_accounting(
-    email=<span class="string">"your.email@example.com"</span>,
-    password=<span class="string">"your_password"</span>
-)
-
-<span class="comment"># Discover and load services</span>
-services = client.list_services()
-<span class="keyword">print</span>(f<span class="string">"Available services: {len(services)}"</span>)
-
-<span class="comment"># Load specific services</span>
-data = client.load_service(<span class="string">"irina@openmined.org/openmined-blog"</span>)
-llm = client.load_service(<span class="string">"aggregator@openmined.org/claude-sonnet-3.5"</span>)
-
-<span class="comment"># Create attribution pipeline</span>
-pipeline = client.pipeline(
-    data_sources=[data],
-    synthesizer=llm
-)
-
-<span class="comment"># Execute federated query</span>
-response = pipeline.run(messages=[
-    {<span class="string">"role"</span>: <span class="string">"user"</span>, <span class="string">"content"</span>: <span class="string">"Explain attribution-based control in AI"</span>}
-])
-
-<span class="comment"># Display results with attribution</span>
-<span class="keyword">print</span>(<span class="string">"=== Query Results ==="</span>)
-<span class="keyword">print</span>(f<span class="string">"Answer: {response.content}\n"</span>)
-<span class="keyword">print</span>(f<span class="string">"Attribution:"</span>)
-<span class="keyword">for</span> source <span class="keyword">in</span> response.sources:
-    <span class="keyword">print</span>(f<span class="string">"  • {source.name}: {source.contribution}%"</span>)
-<span class="keyword">print</span>(f<span class="string">"\nTotal Cost: ${response.total_cost}"</span>)
-<span class="keyword">print</span>(f<span class="string">"Model Used: {response.model}"</span>)</code></pre>
             </div>
         </section>
 
         <!-- Key Concepts -->
         <section class="content-section">
             <div class="section-header">
-                <h2>Key Concepts</h2>
+                <h2>Build with syft-hub SDK</h2>
                 <p>Understanding the SyftHub ecosystem</p>
             </div>
 
             <div class="concepts-grid">
-                <div class="concept-card">
-                    <h3>🔐 Authentication</h3>
-                    <p>Secure account management for accessing services, tracking usage, and managing costs.</p>
-                    <a href="authentication.html" class="concept-link">Learn more →</a>
-                </div>
-
                 <div class="concept-card">
                     <h3>🤖 AI Services</h3>
                     <p>Discover, test, and compose AI services including models, data sources, and search capabilities.</p>
@@ -215,18 +131,28 @@ response = pipeline.run(messages=[
                 </div>
 
                 <div class="concept-card">
-                    <h3>🔍 Federated Search</h3>
+                    <h3>🔍 Federated RAG</h3>
                     <p>Query multiple data sources simultaneously while preserving privacy and data ownership.</p>
                     <a href="ai-services.html#search" class="concept-link">Learn about search →</a>
                 </div>
-
+                
                 <div class="concept-card">
                     <h3>🏷️ Attribution Tracking</h3>
                     <p>Transparent tracking of data sources, model contributions, and costs for every query.</p>
                     <a href="ai-services.html#attribution" class="concept-link">See attribution →</a>
                 </div>
+
+                <div class="concept-card">
+                    <h3>🔐 Payments</h3>
+                    <p>Secure account management for accessing services, tracking usage, and managing costs.</p>
+                    <a href="authentication.html" class="concept-link">Learn more →</a>
+                </div>
+
+            
+
             </div>
         </section>
+        
     </main>
 
     <!-- Footer -->
@@ -234,8 +160,8 @@ response = pipeline.run(messages=[
         <div class="footer-container">
             <div class="footer-content">
                 <div class="footer-section">
-                    <strong>SyftHub SDK</strong>
-                    <p>Federated AI with Attribution Control</p>
+                    <strong>syft-hub SDK</strong>
+                    <p>Decentralised AI with Federated RAG</p>
                 </div>
                 <div class="footer-links">
                     <a href="index.html">Home</a>
@@ -247,9 +173,78 @@ response = pipeline.run(messages=[
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>© 2024 OpenMined. Built with privacy in mind.</p>
+                <p>© 2025 OpenMined. Built for a better internet.</p>
             </div>
         </div>
     </footer>
+    <script>
+        (function() {
+            function copyTextToClipboard(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(text);
+                }
+                var textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.setAttribute('readonly', '');
+                textarea.style.position = 'absolute';
+                textarea.style.left = '-9999px';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try { document.execCommand('copy'); } catch (e) {}
+                document.body.removeChild(textarea);
+                return Promise.resolve();
+            }
+
+            function getCodeText(container) {
+                var codes = container.querySelectorAll('pre > code');
+                var parts = [];
+                codes.forEach(function(code) { parts.push(code.textContent.trim()); });
+                return parts.join('\n\n');
+            }
+
+            // Inject copy icon for each pre in steps
+            document.querySelectorAll('.steps pre').forEach(function(pre) {
+                var wrapper = document.createElement('div');
+                wrapper.className = 'code-copy-wrap';
+                pre.parentNode.insertBefore(wrapper, pre);
+                wrapper.appendChild(pre);
+
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'copy-icon-btn';
+                btn.setAttribute('aria-label', 'Copy code');
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+                wrapper.appendChild(btn);
+
+                btn.addEventListener('click', function() {
+                    var code = pre.querySelector('code');
+                    var text = code ? code.textContent.trim() : pre.textContent.trim();
+                    copyTextToClipboard(text).then(function() {
+                        btn.classList.add('copied');
+                        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+                        setTimeout(function(){
+                            btn.classList.remove('copied');
+                            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+                        }, 1200);
+                    });
+                });
+            });
+
+            // Copy all in Quickstart section
+            var copyAllBtn = document.getElementById('copy-all-quickstart-home');
+            if (copyAllBtn) {
+                copyAllBtn.addEventListener('click', function() {
+                    var quickstartSection = copyAllBtn.closest('.content-section');
+                    if (!quickstartSection) return;
+                    var text = getCodeText(quickstartSection.querySelector('.steps'));
+                    copyTextToClipboard(text).then(function() {
+                        var original = copyAllBtn.textContent;
+                        copyAllBtn.textContent = 'Copied All!';
+                        setTimeout(function(){ copyAllBtn.textContent = original; }, 1500);
+                    });
+                });
+            }
+        })();
+    </script>
 </body>
 </html>

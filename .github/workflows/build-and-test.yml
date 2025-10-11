@@ -1,0 +1,191 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop, fixes_launch ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: 1
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        exclude:
+          # Reduce matrix size for faster CI
+          - os: macos-latest
+            python-version: "3.9"
+          - os: windows-latest
+            python-version: "3.9"
+          - os: macos-latest
+            python-version: "3.10"
+          - os: windows-latest
+            python-version: "3.10"
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
+    - name: Create virtual environment
+      run: uv venv .venv --python ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: uv sync --all-extras
+
+    - name: Install package in development mode
+      run: uv pip install -e .
+
+    - name: Run syntax check
+      run: uv run python -m py_compile syft_hub/__init__.py
+
+    - name: Test package import
+      run: uv run python -X utf8 -c "import syft_hub; print('[OK] Package imported successfully')"
+
+    - name: Test imports and class structure (no SyftBox required)
+      run: |
+        uv run python -X utf8 -c "
+        try:
+            # Test core imports
+            from syft_hub import Client
+            print('[OK] Client import successful')
+            
+            # Test that we can import other key components without instantiating
+            from syft_hub.core import Service, Pipeline
+            from syft_hub.models import ChatResponse, SearchResponse
+            from syft_hub.utils.formatting import format_services_table
+            print('[OK] Core component imports successful')
+            
+            # Test Client class structure without instantiation
+            assert hasattr(Client, '__init__'), 'Client.__init__ method missing'
+            assert hasattr(Client, 'list_services'), 'list_services method missing'
+            print('[OK] Client class structure validated')
+            
+            # Test Service class structure
+            assert hasattr(Service, 'chat'), 'Service.chat method missing'
+            assert hasattr(Service, 'search'), 'Service.search method missing'
+            print('[OK] Service class structure validated')
+            
+            # Test that we can create response models
+            from syft_hub.models.responses import ChatResponse
+            from syft_hub.core.types import ChatMessage
+            message = ChatMessage(role='assistant', content='test')
+            chat_resp = ChatResponse(model='test-model', message=message)
+            assert chat_resp.message.content == 'test'
+            print('[OK] Response models working')
+            
+            print('[OK] All import and structure tests passed')
+            
+        except Exception as e:
+            print(f'[ERROR] Test failed: {e}')
+            import traceback
+            traceback.print_exc()
+            exit(1)
+        "
+
+    - name: Check code formatting (if black is available)
+      run: |
+        if uv pip list | grep -q black; then
+          echo "Running black check..."
+          uv run black --check --diff syft_hub/ || echo "[WARNING] Black formatting check failed (non-critical)"
+        else
+          echo "Black not installed, skipping formatting check"
+        fi
+      continue-on-error: true
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+
+    - name: Set up Python 3.12
+      run: uv python install 3.12
+
+    - name: Create virtual environment
+      run: uv venv .venv --python 3.12
+
+    - name: Install dependencies
+      run: uv sync
+
+    - name: Install build dependencies
+      run: uv pip install build twine
+
+    - name: Build package
+      run: uv run python -m build
+
+    - name: Check package
+      run: uv run twine check dist/*
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-files
+        path: dist/
+        retention-days: 7
+
+    - name: Display package info
+      run: |
+        echo "[PACKAGES] Built packages:"
+        ls -la dist/
+        echo ""
+        echo "[INFO] Package contents:"
+        uv run python -X utf8 -c "
+        import os
+        for file in os.listdir('dist'):
+            if file.endswith('.whl'):
+                print(f'Wheel: {file}')
+            elif file.endswith('.tar.gz'):
+                print(f'Source: {file}')
+        "
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+    continue-on-error: true  # Don't fail the entire workflow on security issues
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python 3.12
+      run: uv python install 3.12
+
+    - name: Create virtual environment
+      run: uv venv .venv --python 3.12
+
+    - name: Install dependencies
+      run: uv sync
+
+    - name: Install security tools
+      run: uv pip install safety bandit
+
+    - name: Run safety check
+      run: uv run safety check --json || echo "[WARNING] Safety check found issues (non-critical for CI)"
+
+    - name: Run bandit security scan
+      run: uv run bandit -r syft_hub/ -f json || echo "[WARNING] Bandit found security issues (non-critical for CI)"

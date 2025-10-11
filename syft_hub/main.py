@@ -913,7 +913,7 @@ class Client:
     async def _register_accounting_async(self, email: str, password: str, organization: Optional[str] = None):
         """Register a new accounting user (async)."""
         try:
-            await self.accounting_client.create_accounting_user(email, password, organization)
+            self.accounting_client.register_accounting(email, password, organization)
             self.accounting_client.save_credentials()
             await self._connect_accounting_async(email, password, self.accounting_client.accounting_url)
             logger.info("Accounting setup completed and connected successfully")

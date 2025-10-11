@@ -3,32 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quickstart - SyftHub SDK</title>
+    <title>Quickstart - syft-hub SDK</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <div class="beta-banner">
+        <div class="beta-container">
+            <span class="beta-badge">BETA</span>
+            <span>Payments are turned off during beta. You have $20 in free credits to explore.</span>
+        </div>
+    </div>
     <!-- Header -->
     <header class="header">
         <div class="header-container">
             <a href="index.html" class="logo">
-                <svg width="32" height="32" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="100" height="100" rx="20" fill="#000"/>
-                    <path d="M30 35 L50 20 L70 35 L70 65 L50 80 L30 65 Z" stroke="#fff" stroke-width="3" fill="none"/>
-                    <circle cx="50" cy="50" r="8" fill="#fff"/>
-                </svg>
-                <span>SyftHub SDK</span>
+                <img width="32" height="32" src="syftbox-logo.svg" alt="SyftHub Logo">
+                <span>syft-hub SDK</span>
             </a>
             <nav class="nav">
                 <a href="index.html">Home</a>
                 <a href="quickstart.html" class="active">Quickstart</a>
+                <a href="ai-services.html">Concepts</a>
                 <a href="authentication.html">Authentication</a>
-                <a href="attribution.html">Attribution</a>
-                <a href="api.html">API Reference</a>
-                <a href="examples.html">Examples</a>
-                <a href="https://github.com/OpenMined/syft-nsai-sdk" target="_blank" class="github-link">
+                <a href="get-syftbox.html" class="pill">Get SyftBox</a>
+                <a href="https://github.com/OpenMined/syft-nsai-sdk" target="_blank" class="github-link" rel="noopener noreferrer">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
                     </svg>
@@ -42,7 +43,8 @@
         <section class="content-section">
             <div class="section-header">
                 <h1>Quickstart Guide</h1>
-                <p>Get up and running with SyftHub SDK in under 5 minutes</p>
+                <p>Start with our notebook: <a href="../notebooks/demo_attribution_control.ipynb">notebooks/demo_attribution_control.ipynb</a></p>
+                <button class="button button-secondary" id="copy-all-quickstart" aria-label="Copy all quickstart code">Copy All</button>
             </div>
 
             <!-- Prerequisites -->
@@ -61,7 +63,7 @@
                     <div class="step-number">1</div>
                     <div class="step-content">
                         <h3>Install the SDK</h3>
-                        <p>Install the SyftHub SDK using pip:</p>
+                        <p>Install the syft-hub SDK using pip:</p>
                         <pre><code>pip install syft-hub</code></pre>
                         <p>Or if you're using Poetry:</p>
                         <pre><code>poetry add syft-hub</code></pre>
@@ -160,7 +162,7 @@ response = pipeline.run(messages=[
             <!-- Complete Example -->
             <div class="complete-example">
                 <h2>Complete Example</h2>
-                <p>Here's everything together in a single script:</p>
+                <p>Prefer a notebook? Open <strong>notebooks/demo_attribution_control.ipynb</strong> for an end-to-end walkthrough.</p>
                 <pre><code><span class="keyword">from</span> syft_hub <span class="keyword">import</span> Client
 
 <span class="comment"># Initialize and authenticate</span>
@@ -178,7 +180,7 @@ services = client.list_services()
 data = client.load_service(<span class="string">"irina@openmined.org/openmined-blog"</span>)
 llm = client.load_service(<span class="string">"aggregator@openmined.org/claude-sonnet-3.5"</span>)
 
-<span class="comment"># Create attribution pipeline</span>
+<span class="comment"># Create federated pipeline</span>
 pipeline = client.pipeline(
     data_sources=[data],
     synthesizer=llm
@@ -210,13 +212,13 @@ response = pipeline.run(messages=[
                     </div>
                     <div class="next-step-card">
                         <h3>🏷️ Understand Attribution</h3>
-                        <p>Deep dive into how attribution tracking works and why it matters for AI governance.</p>
-                        <a href="attribution.html" class="button button-secondary">Attribution Control →</a>
+                        <p>Every query goes to the source, making attribution possible and auditable.</p>
+                        <a href="ai-services.html#attribution" class="button button-secondary">Attribution Control →</a>
                     </div>
                     <div class="next-step-card">
                         <h3>📚 Explore Examples</h3>
                         <p>See real-world use cases including research, healthcare, and enterprise applications.</p>
-                        <a href="examples.html" class="button button-secondary">View Examples →</a>
+                        <a href="../notebooks/demo_attribution_control.ipynb" class="button button-secondary">Open Demo Notebook →</a>
                     </div>
                 </div>
             </div>
@@ -252,8 +254,8 @@ response = pipeline.run(messages=[
         <div class="footer-container">
             <div class="footer-content">
                 <div class="footer-section">
-                    <strong>SyftHub SDK</strong>
-                    <p>Federated AI with Attribution Control</p>
+                    <strong>syft-hub SDK</strong>
+                    <p>Decentralised AI with Federated RAG</p>
                 </div>
                 <div class="footer-links">
                     <div class="footer-column">
@@ -277,5 +279,74 @@ response = pipeline.run(messages=[
             </div>
         </div>
     </footer>
+    <script>
+        (function() {
+            function copyTextToClipboard(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(text);
+                }
+                var textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.setAttribute('readonly', '');
+                textarea.style.position = 'absolute';
+                textarea.style.left = '-9999px';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try { document.execCommand('copy'); } catch (e) {}
+                document.body.removeChild(textarea);
+                return Promise.resolve();
+            }
+
+            function getCodeText(container) {
+                var codes = container.querySelectorAll('pre > code');
+                var parts = [];
+                codes.forEach(function(code) { parts.push(code.textContent.trim()); });
+                return parts.join('\n\n');
+            }
+
+            // Inject copy icon for each pre in steps
+            document.querySelectorAll('.steps pre').forEach(function(pre) {
+                var wrapper = document.createElement('div');
+                wrapper.className = 'code-copy-wrap';
+                pre.parentNode.insertBefore(wrapper, pre);
+                wrapper.appendChild(pre);
+
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'copy-icon-btn';
+                btn.setAttribute('aria-label', 'Copy code');
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+                wrapper.appendChild(btn);
+
+                btn.addEventListener('click', function() {
+                    var code = pre.querySelector('code');
+                    var text = code ? code.textContent.trim() : pre.textContent.trim();
+                    copyTextToClipboard(text).then(function() {
+                        btn.classList.add('copied');
+                        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+                        setTimeout(function(){
+                            btn.classList.remove('copied');
+                            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+                        }, 1200);
+                    });
+                });
+            });
+
+            // Copy all in Quickstart section
+            var copyAllBtn = document.getElementById('copy-all-quickstart');
+            if (copyAllBtn) {
+                copyAllBtn.addEventListener('click', function() {
+                    var quickstartSection = copyAllBtn.closest('.content-section');
+                    if (!quickstartSection) return;
+                    var text = getCodeText(quickstartSection.querySelector('.steps'));
+                    copyTextToClipboard(text).then(function() {
+                        var original = copyAllBtn.textContent;
+                        copyAllBtn.textContent = 'Copied All!';
+                        setTimeout(function(){ copyAllBtn.textContent = original; }, 1500);
+                    });
+                });
+            }
+        })();
+    </script>
 </body>
 </html>
