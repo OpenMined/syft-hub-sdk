@@ -1,6 +1,8 @@
 """
 Formatting utilities for displaying service information
 """
+import hashlib
+from IPython.display import display, HTML
 from typing import List, Optional
 from datetime import datetime
 
@@ -352,3 +354,209 @@ def _format_health_status(status: HealthStatus) -> str:
         HealthStatus.NOT_APPLICABLE: "N/A ➖"
     }
     return status_map.get(status, f"{status.value} ❓")
+
+def display_text_with_copy(text: str, label: str = None, mask: bool = False):
+    """Display text inline with copy button.
+    
+    Args:
+        text: The text to display and copy
+        label: Label to show before the text (default: None, no label shown)
+        mask: Whether to mask the displayed text (default: False)
+    """
+    # Generate unique ID from timestamp
+    import time
+    unique_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+    
+    # Display text (masked or plain)
+    display_text = '••••••••' if mask else text
+    
+    # Label HTML (only if label provided)
+    label_html = f'<span>{label}:</span>' if label else ''
+    
+    # SVG icons
+    clipboard_icon = '''<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle;">
+        <path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2z"/>
+        <path d="M2 6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1H6a3 3 0 0 1-3-3V6H2z"/>
+    </svg>'''
+    
+    checkmark_icon = '''<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle;">
+        <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+    </svg>'''
+    
+    html = f'''
+    <style>
+        .pwd-line-{unique_id} {{
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 0;
+            font-size: 14px;
+        }}
+        .pwd-text-{unique_id} {{
+            font-family: monospace;
+            color: #333;
+            user-select: all;
+            background-color: #f0f0f0;
+            padding: 4px 8px;
+            border-radius: var(--jp-border-radius);
+        }}
+        .copy-btn-{unique_id} {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 8px;
+            background: transparent;
+            border: 1px solid #d0d0d0;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #666;
+            min-width: 32px;
+            height: 28px;
+        }}
+        .copy-btn-{unique_id}:hover {{
+            background: #e8e8e8;
+            border-color: #b0b0b0;
+        }}
+        .copy-btn-{unique_id}:active {{
+            transform: scale(0.95);
+        }}
+        .copy-btn-{unique_id}.copied {{
+            color: #16a34a;
+            border-color: #16a34a;
+        }}
+        .warning-{unique_id} {{
+            color: #d97706;
+            font-size: 13px;
+            margin-top: 4px;
+        }}
+    </style>
+    
+    <div>
+        <div class="pwd-line-{unique_id}">
+            {label_html}
+            <span class="pwd-text-{unique_id}" id="pwd-{unique_id}">{display_text}</span>
+            <button class="copy-btn-{unique_id}" id="btn-{unique_id}" onclick="copyPassword_{unique_id}()" title="Copy to clipboard">
+                <span id="icon-{unique_id}">{clipboard_icon}</span>
+            </button>
+        </div>
+    </div>
+    
+    <script>
+    async function copyPassword_{unique_id}() {{
+        // Always copy the actual text, not the masked version
+        const actualText = `{text}`;
+        const btn = document.getElementById('btn-{unique_id}');
+        const icon = document.getElementById('icon-{unique_id}');
+        
+        try {{
+            await navigator.clipboard.writeText(actualText);
+            
+            // Show success state
+            btn.classList.add('copied');
+            icon.innerHTML = `{checkmark_icon}`;
+            
+            // Revert after 2 seconds
+            setTimeout(() => {{
+                btn.classList.remove('copied');
+                icon.innerHTML = `{clipboard_icon}`;
+            }}, 2000);
+        }} catch (err) {{
+            console.error('Copy failed:', err);
+            alert('Copy failed. Please select and copy the password manually.');
+        }}
+    }}
+    </script>
+    '''
+    
+    display(HTML(html))
+
+
+def display_text_with_copy_widget(text: str, mask: bool = False) -> str:
+    """Generate inline copy button HTML for widget display.
+    
+    Args:
+        text: The text to display and copy
+        mask: Whether to mask the displayed text (default: False)
+        
+    Returns:
+        HTML string with text and inline copy button
+    """
+    # Generate unique ID from timestamp
+    import time
+    unique_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+    
+    # Display text (masked or plain)
+    display_text = '••••••••' if mask else text
+    
+    clipboard_icon = '''<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2z"/>
+        <path d="M2 6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1H6a3 3 0 0 1-3-3V6H2z"/>
+    </svg>'''
+    
+    checkmark_icon = '''<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+    </svg>'''
+    
+    html = f'''
+    <style>
+        .widget-pwd-wrapper-{unique_id} {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .widget-copy-btn-{unique_id} {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2px 6px;
+            background: transparent;
+            border: 1px solid #d0d0d0;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #666;
+            vertical-align: middle;
+        }}
+        .widget-copy-btn-{unique_id}:hover {{
+            background: #e8e8e8;
+            border-color: #b0b0b0;
+        }}
+        .widget-copy-btn-{unique_id}.copied {{
+            color: #16a34a;
+            border-color: #16a34a;
+        }}
+    </style>
+    
+    <span class="widget-pwd-wrapper-{unique_id}">
+        <span id="widget-pwd-{unique_id}">{display_text}</span>
+        <button class="widget-copy-btn-{unique_id}" id="widget-btn-{unique_id}" 
+                onclick="copyWidgetPassword_{unique_id}()" title="Copy to clipboard">
+            <span id="widget-icon-{unique_id}">{clipboard_icon}</span>
+        </button>
+    </span>
+    
+    <script>
+    async function copyWidgetPassword_{unique_id}() {{
+        // Always copy the actual text, not the masked version
+        const actualText = `{text}`;
+        const btn = document.getElementById('widget-btn-{unique_id}');
+        const icon = document.getElementById('widget-icon-{unique_id}');
+        
+        try {{
+            await navigator.clipboard.writeText(actualText);
+            btn.classList.add('copied');
+            icon.innerHTML = `{checkmark_icon}`;
+            setTimeout(() => {{
+                btn.classList.remove('copied');
+                icon.innerHTML = `{clipboard_icon}`;
+            }}, 2000);
+        }} catch (err) {{
+            console.error('Copy failed:', err);
+        }}
+    }}
+    </script>
+    '''
+    
+    return html
