@@ -33,7 +33,7 @@ from .discovery import FastScanner, MetadataParser, ServiceFilter, FilterCriteri
 from .clients import AccountingClient, AuthClient
 from .services import ChatService, SearchService, HealthMonitor, check_service_health, batch_health_check
 from .models import ChatResponse, SearchResponse, DocumentResult, ServicesList, ServiceInfo
-from .utils.formatting import format_services_table, format_service_details
+from .utils.formatting import display_text_with_copy, format_services_table, format_service_details
 from .utils.async_utils import detect_async_context, run_async_in_thread
 from .utils.spinner import Spinner
 
@@ -144,7 +144,7 @@ class Client:
                     client.save_credentials()
                     self.accounting_client = client
                     self._account_configured = True
-                    print(f"Generated password: {generated_password}")
+                    display_text_with_copy(generated_password, label="Generated password", mask=False)
                     print("⚠️ Save the password, this won't be shown again!")
                     logger.info(f"Successfully created accounting account for {user_email}")
                 except Exception as e:
