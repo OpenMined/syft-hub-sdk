@@ -3195,6 +3195,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyjwt"
+version = "2.10.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/46/bd74733ff231675599650d3e47f361794b22ef3e3770998dda30d3b63726/pyjwt-2.10.1.tar.gz", hash = "sha256:3cc5772eb20009233caf06e9d8a0577824723b44e6648ee0a2aedb6cf9381953", size = 87785, upload-time = "2024-11-28T03:43:29.933Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/ad/689f02752eeec26aed679477e80e632ef1b682313be70793d798c1d5fc8f/PyJWT-2.10.1-py3-none-any.whl", hash = "sha256:dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb", size = 22997, upload-time = "2024-11-28T03:43:27.893Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3879,6 +3888,11 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+installer = [
+    { name = "syft-installer" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "ipykernel" },
@@ -3908,11 +3922,13 @@ requires-dist = [
     { name = "syft-accounting-sdk", specifier = ">=0.1.0" },
     { name = "syft-core", specifier = ">=0.2.8" },
     { name = "syft-crypto", specifier = ">=0.1.1" },
+    { name = "syft-installer", marker = "extra == 'installer'", specifier = ">=0.9.1" },
     { name = "syft-rpc", specifier = ">=0.4.0" },
     { name = "tabulate", specifier = ">=0.9.0" },
     { name = "typer", specifier = ">=0.15.2" },
     { name = "uvicorn", specifier = ">=0.24.0" },
 ]
+provides-extras = ["installer"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3920,6 +3936,20 @@ dev = [
     { name = "jupyter", specifier = ">=1.0.0" },
     { name = "matplotlib", specifier = ">=3.5.0" },
     { name = "openai", specifier = ">=1.70.0" },
+]
+
+[[package]]
+name = "syft-installer"
+version = "0.9.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyjwt" },
+    { name = "requests" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/89/0c/c603e253780f5295a791e806fae792c3a19fb1a68db3d3cc7db1f286e925/syft_installer-0.9.1.tar.gz", hash = "sha256:0af4ca84025afe9e39001fad807cacd318bf83e0a61ddc66b3ec2eb6462d7e1e", size = 28456, upload-time = "2025-07-22T05:48:26.669Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/04/eeb92f4e5412850ce6420331a582b7e4a131814ba7f43c2845386740ec18/syft_installer-0.9.1-py3-none-any.whl", hash = "sha256:6c20fbba595f942deab2769cc1f1e20402e665142244f7e4478e759ca3c9e72e", size = 27206, upload-time = "2025-07-22T05:48:25.351Z" },
 ]
 
 [[package]]
