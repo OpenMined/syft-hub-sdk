@@ -36,6 +36,7 @@ from .models import ChatResponse, SearchResponse, DocumentResult, ServicesList, 
 from .utils.formatting import display_text_with_copy, format_services_table, format_service_details
 from .utils.async_utils import detect_async_context, run_async_in_thread
 from .utils.spinner import Spinner
+from .views.progress_widget import get_progress_widget_html
 
 logger = logging.getLogger(__name__)
 
@@ -1692,25 +1693,13 @@ class Client:
         
         def update_progress():
             """Update the progress display."""
-            progress_pct = int((completed / total) * 100)
             progress_bar_width = int((completed / total) * 40)
             bar = '█' * progress_bar_width + '░' * (40 - progress_bar_width)
             
             if in_notebook:
                 # Use HTML display for notebooks
-                html = f'''
-                <div style="font-family: monospace; padding: 8px; background: #f5f5f5; border-radius: 4px; margin: 4px 0;">
-                    <div style="margin-bottom: 4px;">🔍 Checking service health...</div>
-                    <div style="background: #e0e0e0; border-radius: 8px; height: 24px; position: relative; overflow: hidden;">
-                        <div style="background: linear-gradient(90deg, #4CAF50, #45a049); height: 100%; width: {progress_pct}%; transition: width 0.3s;"></div>
-                        <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: #333; font-weight: bold;">
-                            {completed}/{total} services | ✅ {online_count} online ({progress_pct}%)
-                        </div>
-                    </div>
-                </div>
-                '''
                 clear_output(wait=True)
-                display(HTML(html))
+                display(HTML(get_progress_widget_html(completed, total, online_count)))
             else:
                 # Use terminal output for non-notebook
                 print(f"\r🔍 [{bar}] {completed}/{total} services | ✅ {online_count} online", end='', flush=True)
