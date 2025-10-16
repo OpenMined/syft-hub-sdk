@@ -359,6 +359,7 @@ class AccountingClient:
     def _repr_html_(self) -> str:
         """Display HTML widget in Jupyter environments - same as show()."""
         from ..utils.theme import generate_adaptive_css
+        from ..utils.formatting import display_text_with_copy_widget
         
         is_configured = self.is_configured()
         email = self.get_email() if is_configured else None
@@ -369,6 +370,15 @@ class AccountingClient:
         else:
             overall_badge = '<span class="status-badge badge-not-ready">Not Configured</span>'
         
+        # Password display with copy button
+        if is_configured and self._credentials and 'password' in self._credentials:
+            password_html = display_text_with_copy_widget(
+                self._credentials['password'],
+                mask=False  # Set to True if you want to mask the password in widget
+            )
+        else:
+            password_html = 'Not set'
+
         # Generate adaptive CSS for both light and dark themes
         html = generate_adaptive_css('accounting')
         
@@ -391,7 +401,7 @@ class AccountingClient:
                 
                 <div class="status-line">
                     <span class="status-label">Password:</span>
-                    <span class="status-value">{'••••••••' if is_configured else 'Not set'}</span>
+                    <span class="status-value">{password_html}</span>
                 </div>
                 
                 <div class="docs-section">
