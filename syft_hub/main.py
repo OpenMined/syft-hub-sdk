@@ -342,11 +342,11 @@ class Client:
 
         logger.info(f"Client initialized for {self.syft_client.email}")
     
-    def _wait_for_sync_completion(self, timeout: float = 30.0, check_interval: float = 0.5):
+    def _wait_for_sync_completion(self, timeout: float = 60.0, check_interval: float = 0.5):
         """Wait for SyftBox sync to complete by monitoring the log file.
         
         Args:
-            timeout: Maximum time to wait for sync (default: 100 seconds)
+            timeout: Maximum time to wait for sync (default: 60 seconds)
             check_interval: Interval between log checks (default: 0.5 seconds)
         """
         import os
