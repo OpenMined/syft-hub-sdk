@@ -9,6 +9,8 @@ import hashlib
 import time
 import contextlib
 import io
+import sys
+import threading
 
 from typing import List, Optional, Dict, Any, Union, Awaitable
 from pathlib import Path
@@ -43,6 +45,64 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+@contextlib.contextmanager
+def _suppress_syft_crypto_output():
+    """Temporarily silence syft-crypto logs and stdout/stderr noise."""
+    crypto_logger_names = [
+        'syft_crypto',
+        'syft.crypto',
+    ]
+    saved_states = []
+    # Best-effort: disable loguru for syft-crypto emitters
+    loguru_logger = None
+    try:
+        from loguru import logger as _loguru_logger
+        loguru_logger = _loguru_logger
+        try:
+            loguru_logger.disable("syft_crypto")
+            loguru_logger.disable("syft_crypto.x3dh_bootstrap")
+        except Exception:
+            pass
+    except Exception:
+        pass
+    # Configure loggers to be fully quiet
+    for name in crypto_logger_names:
+        lg = logging.getLogger(name)
+        saved_states.append((lg, lg.level, lg.propagate, list(lg.handlers)))
+        lg.setLevel(logging.CRITICAL + 1)
+        lg.propagate = False
+        for h in list(lg.handlers):
+            lg.removeHandler(h)
+        lg.addHandler(logging.NullHandler())
+
+    # Redirect prints
+    _null_stream = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(_null_stream), contextlib.redirect_stderr(_null_stream):
+            yield
+    finally:
+        # Re-enable loguru modules
+        try:
+            if loguru_logger is not None:
+                try:
+                    loguru_logger.enable("syft_crypto")
+                    loguru_logger.enable("syft_crypto.x3dh_bootstrap")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Restore loggers
+        for lg, level, propagate, handlers in saved_states:
+            # remove our NullHandler
+            for h in list(lg.handlers):
+                if isinstance(h, logging.NullHandler):
+                    lg.removeHandler(h)
+            lg.setLevel(level)
+            lg.propagate = propagate
+            # restore previous handlers
+            for h in handlers:
+                lg.addHandler(h)
+
 def _generate_password_from_email_timestamp(email: str) -> str:
     """Generate a password using hash of current timestamp + email.
     
@@ -67,7 +127,9 @@ class Client:
             accounting_pass: Optional[str] = None,
             wait_sync: bool = True,
             _auto_setup_accounting: bool = True,
-            _auto_health_check_threshold: int = 10
+            _auto_health_check_threshold: int = 10,
+            verbose: bool = False,
+            email: Optional[str] = None,
         ):
         """Initialize SyftBox client.
         
@@ -79,23 +141,112 @@ class Client:
             wait_sync: Whether to wait for SyftBox sync to complete before checking services (default: True)
             _auto_setup_accounting: Whether to prompt for accounting setup when needed
             _auto_health_check_threshold: Max services for auto health checking
+            verbose: If True, stream SyftBox logs to stdout
+            email: Optional user email to pass to syft-installer to reduce prompts
         """
-        # Load syft-core client
+        logger.debug(
+            f"Client initialization started (verbose={verbose}, email_provided={email is not None})"
+        )
+        # Attempt to ensure SyftBox is installed and running via optional installer
+        # Preserve interactive behavior by not forcing non-interactive flags
         try:
-            self.syft_client = SyftClient.load(syftbox_config_path)
-        except Exception as e:
-            raise SyftBoxNotFoundError(f"Failed to load SyftBox config: {e}")
+            import syft_installer as si  # type: ignore
+            try:
+                # If no email provided, attempt an interactive prompt when possible
+                email_to_use = email
+                if email_to_use is None:
+                    try:
+                        in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
+                        logger.debug(
+                            f"syft-installer pre-prompt path (in_notebook={in_notebook}, tty={hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()})"
+                        )
+                        if in_notebook or (hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()):
+                            logger.info("SyftBox setup requires an email; prompting user")
+                            entered = input("Enter your email for SyftBox setup: ").strip()
+                            email_to_use = entered if entered else None
+                    except Exception as _:
+                        # Fallback to non-interactive
+                        logger.debug("Interactive prompt unavailable; proceeding without email")
+                        pass
+                if email_to_use is not None:
+                    logger.info("Running syft-installer with provided email")
+                    si.install_and_run_if_needed(email=email_to_use)
+                else:
+                    logger.info("Running syft-installer without email (installer may prompt)")
+                    si.install_and_run_if_needed()
+            except TypeError:
+                # Older installer without email support
+                logger.info("syft-installer version without email arg; running install_and_run_if_needed()")
+                si.install_and_run_if_needed()
+            except Exception as e:
+                # Do not fail client init on installer issues; log at debug level
+                logger.debug(f"syft-installer install/run skipped due to error: {e}")
+        except ImportError:
+            # syft-installer is optional; continue without it
+            logger.info(
+                "syft-installer not installed; skipping automatic install/run. "
+                "Install with 'pip install syft-hub[installer]' to enable guided setup."
+            )
+        # Load syft-core client with installer-assisted retry if missing
+        try:
+            logger.debug("Attempting to load SyftBox config via SyftClient.load()")
+            with _suppress_syft_crypto_output():
+                self.syft_client = SyftClient.load(syftbox_config_path)
+        except Exception as e_first:
+            # Attempt a second try via installer if available, then retry load briefly
+            retried = False
+            try:
+                import syft_installer as si  # type: ignore
+                try:
+                    email_to_use = email
+                    if email_to_use is None:
+                        try:
+                            in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
+                            if in_notebook or (hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()):
+                                logger.info("Retry path: prompting for email for SyftBox setup")
+                                entered = input("Enter your email for SyftBox setup: ").strip()
+                                email_to_use = entered if entered else None
+                        except Exception:
+                            pass
+                    if email_to_use is not None:
+                        logger.info("Retry path: running syft-installer with provided email")
+                        si.install_and_run_if_needed(email=email_to_use)
+                    else:
+                        logger.info("Retry path: running syft-installer without email")
+                        si.install_and_run_if_needed()
+                except TypeError:
+                    logger.info("Retry path: installer without email arg; running install_and_run_if_needed()")
+                    si.install_and_run_if_needed()
+                # Retry loading a few times in case the config just appeared
+                for _ in range(5):
+                    try:
+                        logger.debug("Retrying SyftClient.load() after installer")
+                        self.syft_client = SyftClient.load(syftbox_config_path)
+                        retried = True
+                        break
+                    except Exception:
+                        time.sleep(0.5)
+            except ImportError:
+                # Installer not present; will raise with guidance below
+                logger.info(
+                    "syft-installer not installed during retry; "
+                    "install with 'pip install syft-hub[installer]' to enable guided setup."
+                )
+                pass
+            except Exception as e_retry:
+                logger.debug(f"Installer-assisted retry failed: {e_retry}")
+
+            if not retried and not hasattr(self, 'syft_client'):
+                hint = (
+                    "SyftBox config not found. Install and set up SyftBox first. "
+                    "Tip: pip install syft-hub[installer] and then re-run, or run the quick install script: "
+                    "curl -LsSf https://install.syftbox.openmined.org | sh"
+                )
+                raise SyftBoxNotFoundError(f"Failed to load SyftBox config: {e_first}. {hint}")
         
-        # Bootstrap encryption keys - suppress verbose logging and any stdout/stderr noise
-        crypto_logger = logging.getLogger('syft_crypto')
-        original_level = crypto_logger.level
-        crypto_logger.setLevel(logging.WARNING)
-        _null_stream = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(_null_stream), contextlib.redirect_stderr(_null_stream):
-                self.syft_client = ensure_bootstrap(self.syft_client)
-        finally:
-            crypto_logger.setLevel(original_level)
+        # Bootstrap encryption keys with output fully suppressed
+        with _suppress_syft_crypto_output():
+            self.syft_client = ensure_bootstrap(self.syft_client)
         
         # Verify SyftBox is running by checking datasite exists
         if not self.syft_client.my_datasite.exists():
@@ -106,6 +257,14 @@ class Client:
 
         # Initialize account state
         self._account_configured = False
+
+        # Initialize verbose log streaming early so logs show during sync wait
+        self._verbose = verbose
+        self._log_thread: Optional[threading.Thread] = None
+        self._log_stop_event: Optional[threading.Event] = None
+        if self._verbose:
+            logger.debug("Verbose mode enabled; starting SyftBox log streaming")
+            self._start_log_stream()
 
         # Set up accounting client with new set_accounting logic
         if accounting_client:
@@ -183,7 +342,7 @@ class Client:
 
         logger.info(f"Client initialized for {self.syft_client.email}")
     
-    def _wait_for_sync_completion(self, timeout: float = 100.0, check_interval: float = 0.5):
+    def _wait_for_sync_completion(self, timeout: float = 30.0, check_interval: float = 0.5):
         """Wait for SyftBox sync to complete by monitoring the log file.
         
         Args:
@@ -201,9 +360,14 @@ class Client:
             logger.debug(f"SyftBox log not found at {log_path}, skipping sync wait")
             return
         
-        # Start spinner for sync wait
-        spinner = Spinner("Waiting for SyftBox sync to complete")
-        spinner.start()
+        logger.debug(
+            f"Waiting for SyftBox sync to complete (timeout={timeout}s, check_interval={check_interval}s, verbose={getattr(self, '_verbose', False)})"
+        )
+        # Start spinner for sync wait unless verbose logging is enabled
+        spinner = None
+        if not getattr(self, '_verbose', False):
+            spinner = Spinner("Waiting for SyftBox sync to complete")
+            spinner.start()
         
         start_time = time.time()
         sync_completed = False
@@ -231,7 +395,8 @@ class Client:
                 # Wait before next check
                 time.sleep(check_interval)
             
-            spinner.stop()
+            if spinner:
+                spinner.stop()
             
             if sync_completed:
                 print("✓ SyftBox sync completed")
@@ -239,10 +404,12 @@ class Client:
                 print(f"⚠️ SyftBox sync check timed out after {timeout}s, continuing anyway")
                 
         except KeyboardInterrupt:
-            spinner.stop()
+            if spinner:
+                spinner.stop()
             raise
         except Exception as e:
-            spinner.stop()
+            if spinner:
+                spinner.stop()
             logger.debug(f"Error during sync wait: {e}")
     
     def __dir__(self):
@@ -294,6 +461,8 @@ class Client:
     
     async def close(self):
         """Close client and cleanup resources."""
+        # Stop log streaming if running
+        self._stop_log_stream()
         await self.auth_client.close()
         await self.accounting_client.close()
         if self._health_monitor:
@@ -1559,6 +1728,58 @@ class Client:
         """Clear the service discovery cache and health status cache."""
         self._scanner.clear_cache()
         self._health_status_cache.clear()
+
+    # Internal: log streaming helpers
+    def _get_syftbox_log_path(self) -> Optional[Path]:
+        try:
+            # config_path points to .../.syftbox/config.json; logs are next to it in logs/syftbox.log
+            cfg_path = Path(self.syft_client.config_path)
+            base_dir = cfg_path.parent  # .syftbox
+            log_path = base_dir / "logs" / "syftbox.log"
+            logger.debug(f"Resolved SyftBox log path: {log_path}")
+            return log_path
+        except Exception as e:
+            logger.debug(f"Failed to resolve syftbox log path: {e}")
+            return None
+
+    def _tail_file(self, file_path: Path, stop_event: threading.Event):
+        try:
+            with open(file_path, 'r') as f:
+                # Seek to end, but print a small tail header
+                f.seek(0, 2)
+                # Avoid noisy header while spinner/logs may interleave
+                while not stop_event.is_set():
+                    line = f.readline()
+                    if not line:
+                        stop_event.wait(0.5)
+                        continue
+                    print(line, end='')
+        except FileNotFoundError:
+            print(f"⚠️ SyftBox log not found; expected at {file_path}")
+        except Exception as e:
+            logger.debug(f"Error while tailing SyftBox logs: {e}")
+
+    def _start_log_stream(self):
+        if self._log_thread and self._log_thread.is_alive():
+            return
+        log_path = self._get_syftbox_log_path()
+        if not log_path:
+            return
+        self._log_stop_event = threading.Event()
+        self._log_thread = threading.Thread(
+            target=self._tail_file,
+            args=(log_path, self._log_stop_event),
+            daemon=True,
+        )
+        logger.debug("Starting SyftBox log tail thread")
+        self._log_thread.start()
+
+    def _stop_log_stream(self):
+        if self._log_stop_event:
+            self._log_stop_event.set()
+        if self._log_thread and self._log_thread.is_alive():
+            logger.debug("Stopping SyftBox log tail thread")
+            self._log_thread.join(timeout=1.0)
     
     # Private helper methods
     def _extract_request_parameters(self, request_schema: Dict[str, Any], all_schemas: Dict[str, Any]) -> Dict[str, Any]:
