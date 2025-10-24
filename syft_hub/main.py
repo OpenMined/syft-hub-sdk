@@ -44,7 +44,8 @@ class Client:
             cache_server_url: Optional[str] = None,
             accounting_client: Optional[AccountingClient] = None,
             _auto_setup_accounting: bool = True,
-            _auto_health_check_threshold: int = 10
+            _auto_health_check_threshold: int = 10,
+            email: Optional[str] = None,
         ):
         """Initialize SyftBox client.
         
@@ -58,13 +59,48 @@ class Client:
         # Check SyftBox availability and config manager with custom path if provided
         self.config_manager = ConfigManager(syftbox_config_path)
         
-        # Check if installed first
+        # Best-effort install/start via syft-installer if not installed
+        if not self.config_manager.is_syftbox_installed():
+            try:
+                import syft_installer as si  # type: ignore
+                try:
+                    # Pass email if supported to minimize interactive prompts while preserving interactivity
+                    if email is not None:
+                        si.install_and_run_if_needed(email=email)
+                    else:
+                        si.install_and_run_if_needed()
+                except TypeError:
+                    # Older versions may not accept email parameter
+                    si.install_and_run_if_needed()
+            except ImportError:
+                # syft-installer not available; fall through to standard error path
+                logger.debug("syft-installer not available; skipping auto-install")
+            except Exception as e:
+                # Do not fail here; let the normal checks below provide user-facing guidance
+                logger.debug(f"syft-installer attempt failed: {e}")
+
+        # After best-effort attempt, enforce installation requirement
         if not self.config_manager.is_syftbox_installed():
             raise SyftBoxNotFoundError(self.config_manager.get_installation_instructions())
 
-        # Then check if running  
+        # Ensure SyftBox is running (installer typically starts it; if not, show guidance)
         if not self.config_manager.is_syftbox_running():
-            raise SyftBoxNotRunningError(self.config_manager.get_startup_instructions())
+            # As a second chance, try to start via installer if available
+            try:
+                import syft_installer as si  # type: ignore
+                try:
+                    if email is not None:
+                        si.install_and_run_if_needed(email=email)
+                    else:
+                        si.install_and_run_if_needed()
+                except TypeError:
+                    si.install_and_run_if_needed()
+            except Exception:
+                # Installer not present or failed; proceed to raise with startup instructions
+                pass
+            
+            if not self.config_manager.is_syftbox_running():
+                raise SyftBoxNotRunningError(self.config_manager.get_startup_instructions())
         
         # Store config for later use
         self.config = self.config_manager.config
