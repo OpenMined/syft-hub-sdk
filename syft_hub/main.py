@@ -39,6 +39,8 @@ from .utils.formatting import display_text_with_copy, format_services_table, for
 from .utils.async_utils import detect_async_context, run_async_in_thread
 from .utils.spinner import Spinner
 from .views.progress_widget import get_progress_widget_html
+from .utils.validator import ProcessValidator
+from .utils.constants import DEFAULT_HOST, DEFAULT_APP_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -151,36 +153,42 @@ class Client:
         # Preserve interactive behavior by not forcing non-interactive flags
         try:
             import syft_installer as si  # type: ignore
-            try:
-                # If no email provided, attempt an interactive prompt when possible
-                email_to_use = email
-                if email_to_use is None:
-                    try:
-                        in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
-                        logger.debug(
-                            f"syft-installer pre-prompt path (in_notebook={in_notebook}, tty={hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()})"
-                        )
-                        if in_notebook or (hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()):
-                            logger.info("SyftBox setup requires an email; prompting user")
-                            entered = input("Enter your email for SyftBox setup: ").strip()
-                            email_to_use = entered if entered else None
-                    except Exception as _:
-                        # Fallback to non-interactive
-                        logger.debug("Interactive prompt unavailable; proceeding without email")
-                        pass
-                if email_to_use is not None:
-                    logger.info("Running syft-installer with provided email")
-                    si.install_and_run_if_needed(email=email_to_use)
-                else:
-                    logger.info("Running syft-installer without email (installer may prompt)")
+            
+            # Check if syftbox is already running before attempting to start it
+            # This prevents "address already in use" errors
+            if ProcessValidator.is_syftbox_process_running() or ProcessValidator.is_port_open(DEFAULT_HOST, DEFAULT_APP_PORT):
+                logger.info("Syftbox is already running")
+            else:
+                try:
+                    # If no email provided, attempt an interactive prompt when possible
+                    email_to_use = email
+                    if email_to_use is None:
+                        try:
+                            in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
+                            logger.debug(
+                                f"syft-installer pre-prompt path (in_notebook={in_notebook}, tty={hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()})"
+                            )
+                            if in_notebook or (hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()):
+                                logger.info("SyftBox setup requires an email; prompting user")
+                                entered = input("Enter your email for SyftBox setup: ").strip()
+                                email_to_use = entered if entered else None
+                        except Exception as _:
+                            # Fallback to non-interactive
+                            logger.debug("Interactive prompt unavailable; proceeding without email")
+                            pass
+                    if email_to_use is not None:
+                        logger.info("Running syft-installer with provided email")
+                        si.install_and_run_if_needed(email=email_to_use)
+                    else:
+                        logger.info("Running syft-installer without email (installer may prompt)")
+                        si.install_and_run_if_needed()
+                except TypeError:
+                    # Older installer without email support
+                    logger.info("syft-installer version without email arg; running install_and_run_if_needed()")
                     si.install_and_run_if_needed()
-            except TypeError:
-                # Older installer without email support
-                logger.info("syft-installer version without email arg; running install_and_run_if_needed()")
-                si.install_and_run_if_needed()
-            except Exception as e:
-                # Do not fail client init on installer issues; log at debug level
-                logger.debug(f"syft-installer install/run skipped due to error: {e}")
+                except Exception as e:
+                    # Do not fail client init on installer issues; log at debug level
+                    logger.debug(f"syft-installer install/run skipped due to error: {e}")
         except ImportError:
             # syft-installer is optional; continue without it
             logger.info(
@@ -197,26 +205,31 @@ class Client:
             retried = False
             try:
                 import syft_installer as si  # type: ignore
-                try:
-                    email_to_use = email
-                    if email_to_use is None:
-                        try:
-                            in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
-                            if in_notebook or (hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()):
-                                logger.info("Retry path: prompting for email for SyftBox setup")
-                                entered = input("Enter your email for SyftBox setup: ").strip()
-                                email_to_use = entered if entered else None
-                        except Exception:
-                            pass
-                    if email_to_use is not None:
-                        logger.info("Retry path: running syft-installer with provided email")
-                        si.install_and_run_if_needed(email=email_to_use)
-                    else:
-                        logger.info("Retry path: running syft-installer without email")
+                
+                # Check if syftbox is already running before attempting to start it
+                if ProcessValidator.is_syftbox_process_running() or ProcessValidator.is_port_open(DEFAULT_HOST, DEFAULT_APP_PORT):
+                    logger.info("Syftbox is already running")
+                else:
+                    try:
+                        email_to_use = email
+                        if email_to_use is None:
+                            try:
+                                in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
+                                if in_notebook or (hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()):
+                                    logger.info("Retry path: prompting for email for SyftBox setup")
+                                    entered = input("Enter your email for SyftBox setup: ").strip()
+                                    email_to_use = entered if entered else None
+                            except Exception:
+                                pass
+                        if email_to_use is not None:
+                            logger.info("Retry path: running syft-installer with provided email")
+                            si.install_and_run_if_needed(email=email_to_use)
+                        else:
+                            logger.info("Retry path: running syft-installer without email")
+                            si.install_and_run_if_needed()
+                    except TypeError:
+                        logger.info("Retry path: installer without email arg; running install_and_run_if_needed()")
                         si.install_and_run_if_needed()
-                except TypeError:
-                    logger.info("Retry path: installer without email arg; running install_and_run_if_needed()")
-                    si.install_and_run_if_needed()
                 # Retry loading a few times in case the config just appeared
                 for _ in range(5):
                     try:

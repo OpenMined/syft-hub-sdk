@@ -292,10 +292,22 @@ class ChatResponse(BaseResponse):
         return f'''<div class="markdown-content" style="margin: 12px 16px; font-size: 12px; line-height: 1.4; color: var(--syft-text-primary, inherit);">{formatted_content}</div>'''
 
 @dataclass
+class Query:
+    """Query information with content and embedding."""
+    content: str = ""
+    embedding: Optional[List[float]] = None
+    
+    def __str__(self) -> str:
+        """Return the query content as string for backward compatibility."""
+        return self.content
+
+@dataclass
 class SearchResponse(BaseResponse):
     """Search response data class."""
-    query: str = ""
+    query: Query = field(default_factory=lambda: Query())
     results: List[DocumentResult] = field(default_factory=list)
+    embedding_model: Optional[str] = None
+    similarity_metric: Optional[str] = None
 
     @classmethod
     def from_dict(cls, response_data: Dict[str, Any], original_query: str) -> 'SearchResponse':
@@ -305,6 +317,9 @@ class SearchResponse(BaseResponse):
         {
             "id": "uuid-string",
             "query": "search query", 
+            "queryEmbedding": [...],  # Optional query embedding
+            "embeddingModel": "model-name",  # Optional embedding model
+            "similarityMetric": "cosine",  # Optional similarity metric
             "results": [
                 {
                     "id": "doc-id",
@@ -331,19 +346,32 @@ class SearchResponse(BaseResponse):
             )
             results.append(result)
         
+        # Extract query information
+        query_content = response_data.get('query', original_query)
+        query_embedding = response_data.get('queryEmbedding')  # camelCase from endpoint
+        query_obj = Query(
+            content=query_content,
+            embedding=query_embedding
+        )
+        
         return cls(
             id=response_data.get('id', str(uuid.uuid4())),
-            query=response_data.get('query', original_query),
+            query=query_obj,
             results=results,
             cost=response_data.get('cost'),
-            provider_info=response_data.get('providerInfo')  # camelCase from endpoint
+            provider_info=response_data.get('providerInfo'),  # camelCase from endpoint
+            embedding_model=response_data.get('embeddingModel'),  # camelCase from endpoint
+            similarity_metric=response_data.get('similarityMetric')  # camelCase from endpoint
         )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "id": self.id,
-            "query": self.query,
+            "query": self.query.content if isinstance(self.query, Query) else self.query,
+            "query_embedding": self.query.embedding if isinstance(self.query, Query) else None,
+            "embedding_model": self.embedding_model,
+            "similarity_metric": self.similarity_metric,
             "results": [
                 {
                     "id": result.id,
@@ -365,7 +393,8 @@ class SearchResponse(BaseResponse):
         if not self.results:
             return "No results found."
         
-        parts = [f"Search results for: '{self.query}'"]
+        query_content = self.query.content if isinstance(self.query, Query) else self.query
+        parts = [f"Search results for: '{query_content}'"]
         for i, result in enumerate(self.results, 1):
             parts.append(f"\n{i}. Score: {result.score:.3f}")
             parts.append(f"   {result.content[:100]}{'...' if len(result.content) > 100 else ''}")
@@ -387,7 +416,8 @@ class SearchResponse(BaseResponse):
             ]
             
             # Show query
-            lines.append(f"Query:           {self.query}")
+            query_content = self.query.content if isinstance(self.query, Query) else self.query
+            lines.append(f"Query:           {query_content}")
             lines.append("")
             
             # Show results count and top results
@@ -550,6 +580,15 @@ class SearchResponse(BaseResponse):
         </script>
         """
         
+        # Build optional status lines
+        optional_lines = ""
+        if self.embedding_model:
+            optional_lines += f'<div class="status-line"><span class="status-label">Embedding Model:</span><span class="status-value">{self.embedding_model}</span></div>\n            '
+        if self.similarity_metric:
+            optional_lines += f'<div class="status-line"><span class="status-label">Similarity Metric:</span><span class="status-value">{self.similarity_metric}</span></div>\n            '
+        if isinstance(self.query, Query) and self.query.embedding:
+            optional_lines += f'<div class="status-line"><span class="status-label">Query Embedding:</span><span class="status-value">{len(self.query.embedding)} dimensions</span></div>\n            '
+        
         html += f"""
         <div class="syft-widget">
             <div class="search-response-widget">
@@ -559,9 +598,10 @@ class SearchResponse(BaseResponse):
             
             <div class="status-line">
                 <span class="status-label">Query:</span>
-                <span class="status-value">{self.query}</span>
+                <span class="status-value">{self.query.content if isinstance(self.query, Query) else self.query}</span>
             </div>
             
+            {optional_lines}
             <div class="status-line">
                 <span class="status-label">Results:</span>
                 <span class="status-value">{len(self.results)} documents found</span>
@@ -705,9 +745,10 @@ def create_successful_chat_response(model: str, content: str, **kwargs) -> ChatR
 
 def create_successful_search_response(query: str, results: List[DocumentResult], **kwargs) -> SearchResponse:
     """Create a successful search response."""
+    query_obj = Query(content=query) if isinstance(query, str) else query
     return SearchResponse(
         id=str(uuid.uuid4()),
-        query=query,
+        query=query_obj,
         results=results,
         **kwargs
     )

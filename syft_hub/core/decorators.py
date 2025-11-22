@@ -10,6 +10,8 @@ from typing import Callable, Any
 from syft_core import Client as SyftClient
 from .exceptions import AuthenticationError, SyftBoxNotRunningError
 from ..utils.async_utils import detect_async_context, run_async_in_thread
+from ..utils.validator import ProcessValidator
+from ..utils.constants import DEFAULT_HOST, DEFAULT_APP_PORT
 
 logger = logging.getLogger(__name__)
 # Configuration for robust polling
@@ -38,11 +40,41 @@ def ensure_syftbox_running(func):
             # Attempting this import implements the "Optional Dependency" principle.
             import syft_installer as si
             
+            # Check if syftbox is already running before attempting to start it
+            # This prevents "address already in use" errors
+            if ProcessValidator.is_syftbox_process_running() or ProcessValidator.is_port_open(DEFAULT_HOST, DEFAULT_APP_PORT):
+                logger.info("Syftbox is already running")
+                # Give it a moment to become fully available, then retry
+                await asyncio.sleep(0.5)
+                if syft_client.my_datasite.exists():
+                    return await func(*args, **kwargs)
+                # If datasite still doesn't exist but syftbox is running, 
+                # there might be a configuration issue - raise an error
+                raise SyftBoxNotRunningError(
+                    "SyftBox process is running but datasite is not accessible. "
+                    "This may indicate a configuration issue. Check SyftBox logs for details."
+                )
+            
             logger.warning("SyftBox daemon is stopped. Attempting automatic restart via syft-installer.")
 
             # Use the public API method to start SyftBox if it's currently stopped.
             # This is non-blocking and attempts to start the daemon in the background.
-            started_daemon = si.run_if_stopped() 
+            try:
+                started_daemon = si.run_if_stopped()
+            except Exception as start_error:
+                # Handle case where syftbox might have started between our check and this call
+                error_msg = str(start_error).lower()
+                if "address already in use" in error_msg or "bind" in error_msg:
+                    logger.info("SyftBox is already running")
+                    # Give it a moment to become fully available, then retry
+                    await asyncio.sleep(0.5)
+                    if syft_client.my_datasite.exists():
+                        return await func(*args, **kwargs)
+                    # If datasite still doesn't exist, continue with error handling below
+                    started_daemon = False
+                else:
+                    # Re-raise if it's a different error
+                    raise
 
             if started_daemon:
                 logger.info("SyftBox restart triggered. Polling for successful startup...")
