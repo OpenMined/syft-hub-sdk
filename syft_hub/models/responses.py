@@ -580,15 +580,6 @@ class SearchResponse(BaseResponse):
         </script>
         """
         
-        # Build optional status lines
-        optional_lines = ""
-        if self.embedding_model:
-            optional_lines += f'<div class="status-line"><span class="status-label">Embedding Model:</span><span class="status-value">{self.embedding_model}</span></div>\n            '
-        if self.similarity_metric:
-            optional_lines += f'<div class="status-line"><span class="status-label">Similarity Metric:</span><span class="status-value">{self.similarity_metric}</span></div>\n            '
-        if isinstance(self.query, Query) and self.query.embedding:
-            optional_lines += f'<div class="status-line"><span class="status-label">Query Embedding:</span><span class="status-value">{len(self.query.embedding)} dimensions</span></div>\n            '
-        
         html += f"""
         <div class="syft-widget">
             <div class="search-response-widget">
@@ -601,7 +592,6 @@ class SearchResponse(BaseResponse):
                 <span class="status-value">{self.query.content if isinstance(self.query, Query) else self.query}</span>
             </div>
             
-            {optional_lines}
             <div class="status-line">
                 <span class="status-label">Results:</span>
                 <span class="status-value">{len(self.results)} documents found</span>
